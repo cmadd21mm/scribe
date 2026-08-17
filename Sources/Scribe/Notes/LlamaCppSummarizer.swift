@@ -32,7 +32,7 @@ struct LlamaCppSummarizer: MeetingSummarizer {
         }
 
         let promptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quill-summary-\(UUID().uuidString).txt")
+            .appendingPathComponent("scribe-summary-\(UUID().uuidString).txt")
         try Data(prompt(for: request).utf8).write(to: promptURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: promptURL) }
 
@@ -72,9 +72,16 @@ struct LlamaCppSummarizer: MeetingSummarizer {
         Return exactly one JSON object and no Markdown fences, with this schema:
         {"summary":"string","decisions":["string"],"actionItems":[{"task":"string","owner":"string or null","due":"string or null"}],"openQuestions":["string"]}
         Do not invent decisions, owners, dates, or questions. Empty arrays are valid.
+        Note style: \(request.style.title). \(request.style.guidance)
 
         Meeting: \(request.title)
         Attendees: \(request.attendees.joined(separator: ", "))
+        The user's own notes are high-priority context. Preserve their emphasis,
+        but do not treat a personal thought as a meeting decision unless the
+        transcript supports it.
+
+        User notes:
+        \(request.userNotes.isEmpty ? "(none)" : request.userNotes)
 
         Transcript:
         \(request.transcriptMarkdown)

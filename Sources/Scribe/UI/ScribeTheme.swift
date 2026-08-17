@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum ScribeTheme {
@@ -66,6 +67,7 @@ struct ScribePrimaryButtonStyle: ButtonStyle {
             .padding(.vertical, 11)
             .background(ScribeTheme.button.opacity(configuration.isPressed ? 0.78 : 1))
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .scribePointer()
     }
 }
 
@@ -82,5 +84,40 @@ struct ScribeSecondaryButtonStyle: ButtonStyle {
                     .stroke(ScribeTheme.divider, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .scribePointer()
+    }
+}
+
+private struct ScribePointerCursor: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var isHovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { hovering in
+                guard isEnabled else {
+                    if isHovering { NSCursor.pop() }
+                    isHovering = false
+                    return
+                }
+                if hovering && !isHovering {
+                    NSCursor.pointingHand.push()
+                    isHovering = true
+                } else if !hovering && isHovering {
+                    NSCursor.pop()
+                    isHovering = false
+                }
+            }
+            .onDisappear {
+                if isHovering { NSCursor.pop() }
+                isHovering = false
+            }
+    }
+}
+
+extension View {
+    /// Gives custom clickable surfaces a familiar pointing-hand cursor.
+    func scribePointer() -> some View {
+        modifier(ScribePointerCursor())
     }
 }

@@ -88,6 +88,10 @@ enum NoteRenderer {
 enum NotePipeline {
     static func generate(sessionDir: URL, transcriptMarkdown: String) async throws {
         let context = readContext(from: sessionDir)
+        let userNotes = (try? String(
+            contentsOf: sessionDir.appendingPathComponent("user-notes.md"),
+            encoding: .utf8
+        )) ?? ""
         let rendered: String
         switch Config.localSummarizer() {
         case .available(let summarizer):
@@ -95,7 +99,9 @@ enum NotePipeline {
                 let note = try await summarizer.summarize(SummarizationRequest(
                     title: context.title,
                     attendees: context.attendees,
-                    transcriptMarkdown: transcriptMarkdown
+                    transcriptMarkdown: transcriptMarkdown,
+                    userNotes: userNotes,
+                    style: Config.noteStyle()
                 ))
                 rendered = NoteRenderer.render(
                     context: context,
@@ -103,9 +109,18 @@ enum NotePipeline {
                     backendName: summarizer.backendName
                 )
             } catch {
-                rendered = NoteRenderer.unavailable(
+                let fallback = BuiltInMeetingSummarizer()
+                let note = try await fallback.summarize(SummarizationRequest(
+                    title: context.title,
+                    attendees: context.attendees,
+                    transcriptMarkdown: transcriptMarkdown,
+                    userNotes: userNotes,
+                    style: Config.noteStyle()
+                ))
+                rendered = NoteRenderer.render(
                     context: context,
-                    reason: "local summarizer failed (\(error))"
+                    note: note,
+                    backendName: fallback.backendName
                 )
             }
         case .unavailable(let reason):

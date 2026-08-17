@@ -137,6 +137,20 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
 }
 
 enum MeetingLibraryReader {
+    enum LibraryError: LocalizedError {
+        case emptyTitle
+        case unreadableMeeting
+        case recordingInProgress
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyTitle: return "Enter a meeting name."
+            case .unreadableMeeting: return "The meeting files could not be updated."
+            case .recordingInProgress: return "Stop this recording before changing it."
+            }
+        }
+    }
+
     private struct Metadata: Decodable {
         let state: String?
         let started: String?
@@ -225,6 +239,81 @@ enum MeetingLibraryReader {
         )
     }
 
+    static func rename(_ meeting: MeetingRecord, to proposedTitle: String) throws -> MeetingRecord {
+        let title = proposedTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw LibraryError.emptyTitle }
+        guard meeting.state != "recording" else { throw LibraryError.recordingInProgress }
+        guard !meeting.isDemo else {
+            var renamed = meeting
+            renamed.title = title
+            return renamed
+        }
+
+        let metadataURL = meeting.directory.appendingPathComponent("meta.json")
+        let originalMetadata = try Data(contentsOf: metadataURL)
+        guard var metadata = try JSONSerialization.jsonObject(with: originalMetadata) as? [String: Any]
+        else { throw LibraryError.unreadableMeeting }
+        metadata["title"] = title
+        let updatedMetadata = try JSONSerialization.data(
+            withJSONObject: metadata,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+
+        let noteURL = meeting.directory.appendingPathComponent("note.md")
+        let transcriptURL = meeting.directory.appendingPathComponent("transcript.md")
+        let originalNote = try? Data(contentsOf: noteURL)
+        let originalTranscript = try? Data(contentsOf: transcriptURL)
+
+        let destination = uniqueDestination(for: meeting, title: title)
+        do {
+            try updatedMetadata.write(to: metadataURL, options: .atomic)
+            try rewriteTitle(in: noteURL, title: title)
+            try rewriteTitle(in: transcriptURL, title: title)
+            if destination.path != meeting.directory.path {
+                try FileManager.default.moveItem(at: meeting.directory, to: destination)
+            }
+        } catch {
+            try? originalMetadata.write(to: metadataURL, options: .atomic)
+            if let originalNote { try? originalNote.write(to: noteURL, options: .atomic) }
+            if let originalTranscript { try? originalTranscript.write(to: transcriptURL, options: .atomic) }
+            throw error
+        }
+
+        guard let renamed = read(directory: destination) else { throw LibraryError.unreadableMeeting }
+        return renamed
+    }
+
+    static func moveToTrash(_ meeting: MeetingRecord) throws {
+        guard meeting.state != "recording" else { throw LibraryError.recordingInProgress }
+        guard !meeting.isDemo else { return }
+        try FileManager.default.trashItem(at: meeting.directory, resultingItemURL: nil)
+    }
+
+    private static func uniqueDestination(for meeting: MeetingRecord, title: String) -> URL {
+        let parent = meeting.directory.deletingLastPathComponent()
+        let base = MeetingFolderNamer.name(startedAt: meeting.startedAt, title: title)
+        var destination = parent.appendingPathComponent(base, isDirectory: true)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: destination.path)
+                && destination.path.caseInsensitiveCompare(meeting.directory.path) != .orderedSame {
+            destination = parent.appendingPathComponent("\(base) \(suffix)", isDirectory: true)
+            suffix += 1
+        }
+        return destination
+    }
+
+    private static func rewriteTitle(in url: URL, title: String) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        var lines = try String(contentsOf: url, encoding: .utf8)
+            .components(separatedBy: .newlines)
+        if lines.first?.hasPrefix("# ") == true {
+            lines[0] = "# \(title)"
+        } else {
+            lines.insert(contentsOf: ["# \(title)", ""], at: 0)
+        }
+        try Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic)
+    }
+
     private static func readTranscript(_ directory: URL) -> [MeetingTranscriptLine] {
         let url = directory.appendingPathComponent("transcript.json")
         guard let data = try? Data(contentsOf: url),
@@ -297,7 +386,7 @@ enum MeetingLibraryReader {
     private static func fallbackSummary(transcript: [MeetingTranscriptLine]) -> String {
         transcript.isEmpty
             ? "This meeting is waiting for local transcription."
-            : "The transcript is ready. Configure a local summary model in Settings to generate structured notes."
+            : "The transcript is ready. Scribe is preparing private meeting notes on this Mac."
     }
 
     private static func displaySpeaker(_ raw: String) -> String {
@@ -342,6 +431,9 @@ final class ScribeAppModel: ObservableObject {
     @Published var showSettings = false
     @Published var showOnboarding = false
     @Published var showNotesEditor = false
+    @Published var showRenameEditor = false
+    @Published var showDeleteConfirmation = false
+    @Published var regeneratingMeetingID: String?
     @Published var alertMessage: String?
     @Published var playingMeetingID: String?
     @Published private(set) var root: URL
@@ -350,6 +442,7 @@ final class ScribeAppModel: ObservableObject {
     @Published private(set) var voiceProcessingEnabled: Bool
     @Published private(set) var enabledBundleIDs: Set<String>
     @Published private(set) var launchAtLogin: Bool
+    @Published private(set) var noteStyle: MeetingNoteStyle
 
     var onToggleRecording: (() -> Void)?
     var onChooseRecordingsFolder: (() -> Void)?
@@ -366,6 +459,7 @@ final class ScribeAppModel: ObservableObject {
         voiceProcessingEnabled = Config.micVoiceProcessing()
         enabledBundleIDs = Config.callAppBundleIDs()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        noteStyle = Config.noteStyle()
         showOnboarding = !demo && !UserDefaults.standard.bool(forKey: "scribe.onboarding.complete")
         refresh()
     }
@@ -467,12 +561,73 @@ final class ScribeAppModel: ObservableObject {
     func saveUserNotes(_ text: String) {
         guard let index = meetings.firstIndex(where: { $0.id == selectedMeetingID }) else { return }
         meetings[index].userNotes = text
+        let shouldRefresh = meetings[index].hasTranscript
+            && meetings[index].state != "recording"
+            && !meetings[index].isDemo
         do {
             try MeetingLibraryReader.saveUserNotes(text, for: meetings[index])
         } catch {
             alertMessage = "Scribe couldn’t save your notes: \(error.localizedDescription)"
         }
         showNotesEditor = false
+        if shouldRefresh { regenerateSelectedNote() }
+    }
+
+    func renameSelectedMeeting(to proposedTitle: String) {
+        guard let index = meetings.firstIndex(where: { $0.id == selectedMeetingID }) else { return }
+        do {
+            let renamed = try MeetingLibraryReader.rename(meetings[index], to: proposedTitle)
+            if meetings[index].isDemo {
+                meetings[index] = renamed
+                selectedMeetingID = renamed.id
+            } else {
+                refresh(preservingSelection: false)
+                selectedMeetingID = renamed.id
+            }
+            showRenameEditor = false
+        } catch {
+            alertMessage = "Scribe couldn’t rename this meeting: \(error.localizedDescription)"
+        }
+    }
+
+    func moveSelectedMeetingToTrash() {
+        guard let meeting = selectedMeeting else { return }
+        do {
+            if meeting.isDemo {
+                meetings.removeAll { $0.id == meeting.id }
+                selectedMeetingID = meetings.first?.id
+            } else {
+                try MeetingLibraryReader.moveToTrash(meeting)
+                refresh(preservingSelection: false)
+            }
+            showDeleteConfirmation = false
+        } catch {
+            alertMessage = "Scribe couldn’t move this meeting to Trash: \(error.localizedDescription)"
+        }
+    }
+
+    func regenerateSelectedNote() {
+        guard let meeting = selectedMeeting,
+              !meeting.isDemo,
+              meeting.state != "recording",
+              meeting.hasTranscript,
+              regeneratingMeetingID == nil
+        else { return }
+        let transcriptURL = meeting.directory.appendingPathComponent("transcript.md")
+        regeneratingMeetingID = meeting.id
+        Task {
+            do {
+                let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
+                try await NotePipeline.generate(
+                    sessionDir: meeting.directory,
+                    transcriptMarkdown: transcript
+                )
+                refresh()
+            } catch {
+                alertMessage = "Scribe couldn’t refresh these notes: \(error.localizedDescription)"
+            }
+            regeneratingMeetingID = nil
+        }
     }
 
     func togglePlayback() {
@@ -504,6 +659,11 @@ final class ScribeAppModel: ObservableObject {
             value.engine = value.engine ?? "parakeet"
             $0.transcription = value
         }
+    }
+
+    func setNoteStyle(_ style: MeetingNoteStyle) {
+        noteStyle = style
+        persist { $0.noteStyle = style.rawValue }
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) {
@@ -552,7 +712,7 @@ final class ScribeAppModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
-    private func persist(_ change: (inout QuillConfiguration) -> Void) {
+    private func persist(_ change: (inout ScribeConfiguration) -> Void) {
         do {
             try Config.update(change)
         } catch {

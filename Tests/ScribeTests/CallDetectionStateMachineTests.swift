@@ -2,7 +2,7 @@ import CoreAudio
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct CallDetectionStateMachineTests {
     @Test("A live call prompts only after the configured delay")

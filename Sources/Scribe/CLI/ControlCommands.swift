@@ -2,7 +2,7 @@ import AppKit
 import ArgumentParser
 import Foundation
 
-enum QuillControlNotification {
+enum ScribeControlNotification {
     static let start = Notification.Name("com.cmadd21mm.scribe.control.start")
     static let stop = Notification.Name("com.cmadd21mm.scribe.control.stop")
     static let quit = Notification.Name("com.cmadd21mm.scribe.control.quit")
@@ -33,7 +33,7 @@ struct StartRecording: ParsableCommand {
     func run() {
         var info: [String: Any] = ["title": title]
         if !bundleID.isEmpty { info["bundle_ids"] = bundleID }
-        ControlClient.post(QuillControlNotification.start, userInfo: info)
+        ControlClient.post(ScribeControlNotification.start, userInfo: info)
         print("recording request sent to Scribe")
     }
 }
@@ -45,7 +45,7 @@ struct StopRecording: ParsableCommand {
     )
 
     func run() {
-        ControlClient.post(QuillControlNotification.stop)
+        ControlClient.post(ScribeControlNotification.stop)
         print("stop request sent to Scribe")
     }
 }
@@ -57,7 +57,7 @@ struct QuitDaemon: ParsableCommand {
     )
 
     func run() {
-        ControlClient.post(QuillControlNotification.quit)
+        ControlClient.post(ScribeControlNotification.quit)
         print("quit request sent to Scribe")
     }
 }

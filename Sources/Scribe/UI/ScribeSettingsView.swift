@@ -18,6 +18,7 @@ struct ScribeSettingsView: View {
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
+                    .scribePointer()
             }
             .padding(24)
 
@@ -78,6 +79,7 @@ struct ScribeSettingsView: View {
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .tint(ScribeTheme.coral)
+                                .scribePointer()
                             }
                             .padding(.vertical, 4)
                         }
@@ -107,6 +109,45 @@ struct ScribeSettingsView: View {
                                 model.onDownloadTranscriptionModel?()
                             }
                             .buttonStyle(ScribeSecondaryButtonStyle())
+                        }
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "text.document")
+                                .foregroundStyle(ScribeTheme.ink)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Meeting notes are always ready")
+                                    .font(ScribeTheme.sans(13, weight: .medium))
+                                Text("Scribe creates private summaries, decisions, action items, and questions without an account or model setup. A configured local llama.cpp model automatically improves the result.")
+                                    .font(ScribeTheme.sans(10))
+                                    .foregroundStyle(ScribeTheme.faintInk)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer()
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(ScribeTheme.coral)
+                                .accessibilityLabel("Ready")
+                        }
+                        HStack(spacing: 12) {
+                            Image(systemName: "slider.horizontal.3")
+                                .foregroundStyle(ScribeTheme.ink)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Note style")
+                                    .font(ScribeTheme.sans(13, weight: .medium))
+                                Text("Choose the shape of future meeting summaries.")
+                                    .font(ScribeTheme.sans(10))
+                                    .foregroundStyle(ScribeTheme.faintInk)
+                            }
+                            Spacer()
+                            Picker("Note style", selection: Binding(
+                                get: { model.noteStyle },
+                                set: { model.setNoteStyle($0) }
+                            )) {
+                                ForEach(MeetingNoteStyle.allCases, id: \.self) { style in
+                                    Text(style.title).tag(style)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 150)
+                            .scribePointer()
                         }
                     }
 
@@ -201,6 +242,7 @@ struct ScribeSettingsView: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(ScribeTheme.coral)
+                .scribePointer()
         }
     }
 

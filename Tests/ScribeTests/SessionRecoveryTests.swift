@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct SessionRecoveryTests {
     @Test("Recovery finds an interrupted session and makes it transcribable")
@@ -58,7 +58,7 @@ struct SessionRecoveryTests {
 
     private func temporaryRoot() throws -> URL {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quill-recovery-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("scribe-recovery-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }

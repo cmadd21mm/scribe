@@ -3,8 +3,8 @@ set -eu
 
 forbidden='URLSession|URLSessionTask|NWConnection|import[[:space:]]+Network|CFNetwork|downloadAndLoad|ModelHub\.download|AsrModels\.download|https?://'
 
-matches="$({ grep -EnR --include='*.swift' "$forbidden" Sources/quill || true; } \
-    | grep -v '^Sources/quill/CLI/ModelsCommand.swift:' \
+matches="$({ grep -EnR --include='*.swift' "$forbidden" Sources/Scribe || true; } \
+    | grep -v '^Sources/Scribe/CLI/ModelsCommand.swift:' \
     | grep -v 'xmlns="http://www.w3.org/2000/svg"' || true)"
 
 if [ -n "$matches" ]; then

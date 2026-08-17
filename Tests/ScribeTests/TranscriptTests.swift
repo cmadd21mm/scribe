@@ -1,14 +1,14 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct TranscriptTests {
     @Test("A failed Markdown write does not leave the completion marker")
     func failedMarkdownWriteDoesNotLeaveCompletionMarker() throws {
         let fileManager = FileManager.default
         let session = fileManager.temporaryDirectory
-            .appendingPathComponent("quill-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("scribe-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: session, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: session) }
 

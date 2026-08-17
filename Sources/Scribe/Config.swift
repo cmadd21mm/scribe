@@ -1,6 +1,6 @@
 import Foundation
 
-struct QuillConfiguration: Codable, Equatable, Sendable {
+struct ScribeConfiguration: Codable, Equatable, Sendable {
     struct Transcription: Codable, Equatable, Sendable {
         var enabled: Bool? = nil
         var engine: String? = nil
@@ -28,6 +28,7 @@ struct QuillConfiguration: Codable, Equatable, Sendable {
     var callEndDelaySeconds: Double? = nil
     var minimumFreeDiskGB: Double? = nil
     var promptForCalls: Bool? = nil
+    var noteStyle: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case recordingsDir = "recordings_dir"
@@ -38,6 +39,7 @@ struct QuillConfiguration: Codable, Equatable, Sendable {
         case callEndDelaySeconds = "call_end_delay_seconds"
         case minimumFreeDiskGB = "minimum_free_disk_gb"
         case promptForCalls = "prompt_for_calls"
+        case noteStyle = "note_style"
     }
 }
 
@@ -65,14 +67,11 @@ enum Config {
     static let path = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/scribe/config.json")
 
-    static let legacyPath = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent(".config/quill/config.json")
-
     static let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Recordings", isDirectory: true)
 
-    static func parse(_ data: Data) throws -> QuillConfiguration {
-        try JSONDecoder().decode(QuillConfiguration.self, from: data)
+    static func parse(_ data: Data) throws -> ScribeConfiguration {
+        try JSONDecoder().decode(ScribeConfiguration.self, from: data)
     }
 
     static func recordingsDir() -> URL? {
@@ -109,6 +108,10 @@ enum Config {
         load()?.promptForCalls ?? true
     }
 
+    static func noteStyle() -> MeetingNoteStyle {
+        load()?.noteStyle.flatMap(MeetingNoteStyle.init(rawValue:)) ?? .balanced
+    }
+
     static func minimumFreeDiskBytes() -> Int64 {
         let gigabytes = max(0, load()?.minimumFreeDiskGB ?? 2)
         return Int64(gigabytes * 1_000_000_000)
@@ -116,22 +119,22 @@ enum Config {
 
     static func localSummarizer() -> LocalSummarizerConfiguration {
         guard let summary = load()?.summarization else {
-            return .unavailable("no local summarization model is configured")
+            return .available(BuiltInMeetingSummarizer())
         }
         guard summary.backend == "llama.cpp" else {
-            return .unavailable("summarization.backend must be llama.cpp")
+            return .available(BuiltInMeetingSummarizer())
         }
         guard let executablePath = summary.executable,
               let modelPath = summary.modelPath else {
-            return .unavailable("llama.cpp executable and model_path must be configured")
+            return .available(BuiltInMeetingSummarizer())
         }
         let executable = URL(fileURLWithPath: expand(executablePath))
         let model = URL(fileURLWithPath: expand(modelPath))
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            return .unavailable("llama.cpp executable was not found at \(executable.path)")
+            return .available(BuiltInMeetingSummarizer())
         }
         guard FileManager.default.fileExists(atPath: model.path) else {
-            return .unavailable("local GGUF model was not found at \(model.path)")
+            return .available(BuiltInMeetingSummarizer())
         }
         return .available(LlamaCppSummarizer(
             executable: executable,
@@ -151,17 +154,17 @@ enum Config {
         expand(value)
     }
 
-    static func current() -> QuillConfiguration {
-        load() ?? QuillConfiguration()
+    static func current() -> ScribeConfiguration {
+        load() ?? ScribeConfiguration()
     }
 
-    static func update(_ change: (inout QuillConfiguration) -> Void) throws {
+    static func update(_ change: (inout ScribeConfiguration) -> Void) throws {
         var configuration = current()
         change(&configuration)
         try save(configuration)
     }
 
-    static func save(_ configuration: QuillConfiguration) throws {
+    static func save(_ configuration: ScribeConfiguration) throws {
         try FileManager.default.createDirectory(
             at: path.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -171,20 +174,13 @@ enum Config {
         try encoder.encode(configuration).write(to: path, options: .atomic)
     }
 
-    private static func load() -> QuillConfiguration? {
-        let source: URL
-        if FileManager.default.fileExists(atPath: path.path) {
-            source = path
-        } else if FileManager.default.fileExists(atPath: legacyPath.path) {
-            source = legacyPath
-        } else {
-            return nil
-        }
+    private static func load() -> ScribeConfiguration? {
+        guard FileManager.default.fileExists(atPath: path.path) else { return nil }
         do {
-            return try parse(Data(contentsOf: source))
+            return try parse(Data(contentsOf: path))
         } catch {
             FileHandle.standardError.write(Data(
-                "warning: \(source.path) is invalid (\(error)) — using defaults\n".utf8
+                "warning: \(path.path) is invalid (\(error)) — using defaults\n".utf8
             ))
             return nil
         }

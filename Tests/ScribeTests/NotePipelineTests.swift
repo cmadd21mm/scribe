@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct NotePipelineTests {
     @Test("Local model JSON is parsed even when surrounded by chatter")
@@ -53,5 +53,25 @@ struct NotePipelineTests {
         #expect(markdown.contains("no local summarization model"))
         #expect(markdown.contains("[transcript](transcript.md)"))
         #expect(markdown.contains("did not make a network call"))
+    }
+
+    @Test("Built-in notes find decisions, owners, due dates, and questions without a model")
+    func builtInNotesRequireNoSetup() async throws {
+        let transcript = """
+        **[00:01] Priya:** Let's ship the smaller beta.
+        **[00:08] Jordan:** I'll share the onboarding prototype by Thursday.
+        **[00:15] Alex:** Who owns the support review?
+        """
+        let note = try await BuiltInMeetingSummarizer().summarize(.init(
+            title: "Beta planning",
+            attendees: [],
+            transcriptMarkdown: transcript,
+            userNotes: "Make sure Jordan's prototype is included in the follow-up.",
+            style: .balanced
+        ))
+        #expect(note.decisions == ["Let's ship the smaller beta."])
+        #expect(note.actionItems.first?.owner == "Jordan")
+        #expect(note.actionItems.first?.due?.lowercased() == "by thursday")
+        #expect(note.openQuestions == ["Who owns the support review?"])
     }
 }

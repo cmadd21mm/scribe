@@ -15,8 +15,12 @@ actions, and your own notes together in plain files.
   Record / Not now prompt, but it never starts on its own.
 - **Both sides are clear.** Your microphone and the selected call process are
   captured separately for dependable speaker labels.
-- **Useful after the call.** Search every note, copy a summary, check off action
-  items, add personal context, play the recording, or export Markdown.
+- **Useful after the call.** Search every note, rename or trash meetings, copy a
+  summary, check off action items, add personal context, play the recording, or
+  export Markdown.
+- **Notes that fit the moment.** Choose concise, balanced, detailed, or
+  action-focused summaries. Your quick notes guide the result, and saving an
+  edit refreshes the summary. The built-in local fallback works with no setup.
 - **Local means local.** No account, bot, telemetry, cloud transcript, hidden
   upload, subscription, or proprietary database.
 - **Work and life fit together.** Product reviews, client calls, appointments,
@@ -58,8 +62,8 @@ builds are ad-hoc signed; macOS may ask you to confirm opening one through
 You need macOS 15+, Xcode 16+, and Swift 6.
 
 ```sh
-git clone https://github.com/cmadd21mm/quill.git
-cd quill
+git clone <repository-url> scribe
+cd scribe
 swift test
 sh scripts/build-app.sh
 open dist/Scribe.app
@@ -83,9 +87,10 @@ Scribe Settings, or explicitly from Terminal:
 scribe models download-transcription
 ```
 
-Normal recording and transcription make no network requests. Structured AI
-summaries are optional and use a locally installed `llama.cpp` executable and
-GGUF model. Without one, Scribe still produces the complete local transcript.
+Normal recording and transcription make no network requests. Scribe always
+creates a private structured note with a summary, decisions, action items, and
+open questions. An optional locally installed `llama.cpp` executable and GGUF
+model can make those notes richer; the built-in fallback requires no setup.
 
 ## Your files
 
@@ -109,8 +114,7 @@ before capture, and metadata is written atomically as recording state changes.
 
 ## Configuration
 
-Preferences are written to `~/.config/scribe/config.json`. Existing Quill
-configuration is read as a migration fallback.
+Preferences are written to `~/.config/scribe/config.json`.
 
 ```json
 {

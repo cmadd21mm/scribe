@@ -34,6 +34,23 @@ struct ScribeAppView: View {
                 MeetingNotesEditor(model: model, meeting: meeting)
             }
         }
+        .sheet(isPresented: $model.showRenameEditor) {
+            if let meeting = model.selectedMeeting {
+                MeetingRenameEditor(model: model, meeting: meeting)
+            }
+        }
+        .confirmationDialog(
+            "Move this meeting to Trash?",
+            isPresented: $model.showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Move to Trash", role: .destructive) {
+                model.moveSelectedMeetingToTrash()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The recording, transcript, and notes can be recovered from the Mac Trash.")
+        }
         .alert(
             "Scribe",
             isPresented: Binding(
@@ -91,6 +108,7 @@ private struct MeetingSidebar: View {
                             Image(systemName: "xmark.circle.fill")
                         }
                         .buttonStyle(.plain)
+                        .scribePointer()
                         .foregroundStyle(ScribeTheme.faintInk)
                     }
                 }
@@ -123,7 +141,15 @@ private struct MeetingSidebar: View {
                             ForEach(section.meetings) { meeting in
                                 MeetingSidebarRow(
                                     meeting: meeting,
-                                    selected: model.selectedMeetingID == meeting.id
+                                    selected: model.selectedMeetingID == meeting.id,
+                                    onRename: {
+                                        model.selectedMeetingID = meeting.id
+                                        model.showRenameEditor = true
+                                    },
+                                    onDelete: {
+                                        model.selectedMeetingID = meeting.id
+                                        model.showDeleteConfirmation = true
+                                    }
                                 ) {
                                     model.selectedMeetingID = meeting.id
                                 }
@@ -155,6 +181,7 @@ private struct MeetingSidebar: View {
                         .font(.system(size: 17))
                 }
                 .buttonStyle(.plain)
+                .scribePointer()
                 .foregroundStyle(ScribeTheme.ink)
                 .help("Settings")
             }
@@ -185,6 +212,8 @@ private struct MeetingSidebar: View {
 private struct MeetingSidebarRow: View {
     let meeting: MeetingRecord
     let selected: Bool
+    let onRename: () -> Void
+    let onDelete: () -> Void
     let action: () -> Void
 
     var body: some View {
@@ -227,7 +256,14 @@ private struct MeetingSidebarRow: View {
             .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         }
         .buttonStyle(.plain)
+        .scribePointer()
         .padding(.horizontal, 14)
+        .contextMenu {
+            Button("Rename Meeting…", systemImage: "pencil", action: onRename)
+            Button(role: .destructive, action: onDelete) {
+                Label("Move to Trash", systemImage: "trash")
+            }
+        }
         .accessibilityLabel("\(meeting.title), \(Self.day.string(from: meeting.startedAt))")
     }
 
@@ -260,11 +296,24 @@ private struct MeetingDetail: View {
                 .padding(.horizontal, 34)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(meeting.title)
-                        .font(ScribeTheme.serif(54, weight: .medium))
-                        .foregroundStyle(ScribeTheme.ink)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.76)
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(meeting.title)
+                            .font(ScribeTheme.serif(54, weight: .medium))
+                            .foregroundStyle(ScribeTheme.ink)
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.76)
+                        Button {
+                            model.showRenameEditor = true
+                        } label: {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(ScribeTheme.faintInk)
+                        }
+                        .buttonStyle(.plain)
+                        .scribePointer()
+                        .help("Rename meeting")
+                        .disabled(meeting.state == "recording")
+                    }
                     HStack(spacing: 9) {
                         Text(Self.date.string(from: meeting.startedAt))
                         Text("•")
@@ -309,6 +358,7 @@ private struct MeetingDetail: View {
                                         }
                                     }
                                     .buttonStyle(.plain)
+                                    .scribePointer()
                                 }
                             }
                         }
@@ -386,6 +436,16 @@ private struct MeetingDetail: View {
             .buttonStyle(ScribePrimaryButtonStyle())
 
             Menu {
+                Button("Rename Meeting…", systemImage: "pencil") {
+                    model.showRenameEditor = true
+                }
+                Button(
+                    model.regeneratingMeetingID == meeting.id ? "Refreshing notes…" : "Refresh notes",
+                    systemImage: "arrow.triangle.2.circlepath"
+                ) {
+                    model.regenerateSelectedNote()
+                }
+                .disabled(meeting.isDemo || !meeting.hasTranscript || meeting.state == "recording" || model.regeneratingMeetingID != nil)
                 Button("Export Markdown…", systemImage: "square.and.arrow.down") {
                     model.exportSelectedMeeting()
                 }
@@ -395,12 +455,19 @@ private struct MeetingDetail: View {
                 Button("Open transcript", systemImage: "doc.text.magnifyingglass") {
                     model.openTranscript()
                 }
+                Divider()
+                Button(role: .destructive) {
+                    model.showDeleteConfirmation = true
+                } label: {
+                    Label("Move to Trash", systemImage: "trash")
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: 20, height: 20)
             }
             .menuStyle(.borderlessButton)
             .frame(width: 36)
+            .scribePointer()
         }
     }
 
@@ -489,6 +556,7 @@ private struct MeetingDetail: View {
                 model.openTranscript()
             }
             .buttonStyle(.plain)
+            .scribePointer()
             .font(ScribeTheme.sans(11))
             .foregroundStyle(ScribeTheme.mutedInk)
             .disabled(meeting.isDemo)
@@ -588,6 +656,7 @@ private struct MeetingNotesEditor: View {
                 Spacer()
                 Button("Cancel") { model.showNotesEditor = false }
                     .keyboardShortcut(.cancelAction)
+                    .scribePointer()
                 Button("Save") { model.saveUserNotes(notes) }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
@@ -596,5 +665,56 @@ private struct MeetingNotesEditor: View {
         .padding(26)
         .frame(width: 600, height: 420)
         .background(ScribeTheme.paper)
+    }
+}
+
+struct MeetingRenameEditor: View {
+    @ObservedObject var model: ScribeAppModel
+    let meeting: MeetingRecord
+    @State private var title: String
+    @FocusState private var titleIsFocused: Bool
+
+    init(model: ScribeAppModel, meeting: MeetingRecord) {
+        self.model = model
+        self.meeting = meeting
+        _title = State(initialValue: meeting.title)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Rename meeting")
+                    .font(ScribeTheme.serif(28, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Text("The folder and note title will stay in sync.")
+                    .font(ScribeTheme.sans(12))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            }
+            TextField("Meeting name", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .font(ScribeTheme.sans(15))
+                .focused($titleIsFocused)
+                .onSubmit(save)
+            HStack {
+                Spacer()
+                Button("Cancel") { model.showRenameEditor = false }
+                    .keyboardShortcut(.cancelAction)
+                    .scribePointer()
+                Button("Rename", action: save)
+                    .buttonStyle(ScribePrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(28)
+        .frame(width: 500, height: 220)
+        .background(ScribeTheme.paper)
+        .onAppear { titleIsFocused = true }
+    }
+
+    private func save() {
+        let cleaned = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        model.renameSelectedMeeting(to: cleaned)
     }
 }

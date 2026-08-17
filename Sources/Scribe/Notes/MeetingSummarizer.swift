@@ -1,9 +1,36 @@
 import Foundation
 
+enum MeetingNoteStyle: String, Codable, CaseIterable, Sendable {
+    case concise
+    case balanced
+    case detailed
+    case actionFocused = "action-focused"
+
+    var title: String {
+        switch self {
+        case .concise: return "Concise"
+        case .balanced: return "Balanced"
+        case .detailed: return "Detailed"
+        case .actionFocused: return "Action focused"
+        }
+    }
+
+    var guidance: String {
+        switch self {
+        case .concise: return "Keep the summary to the essential outcome and next step."
+        case .balanced: return "Balance context, decisions, action items, and open questions."
+        case .detailed: return "Preserve important context and supporting discussion without inventing facts."
+        case .actionFocused: return "Prioritize commitments, owners, due dates, and unresolved blockers."
+        }
+    }
+}
+
 struct SummarizationRequest: Sendable {
     let title: String
     let attendees: [String]
     let transcriptMarkdown: String
+    let userNotes: String
+    let style: MeetingNoteStyle
 }
 
 struct StructuredMeetingNote: Codable, Equatable, Sendable {

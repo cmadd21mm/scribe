@@ -27,6 +27,13 @@ struct ScribeCommand: AsyncParsableCommand {
     )
 }
 
+private enum DemoSnapshotScreen: String, ExpressibleByArgument {
+    case library
+    case rename
+    case settings
+    case onboarding
+}
+
 struct DemoSnapshot: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "snapshot",
@@ -36,6 +43,9 @@ struct DemoSnapshot: AsyncParsableCommand {
     @Option(name: .long, help: "PNG output path.")
     var output: String = "scribe-demo.png"
 
+    @Option(name: .long, help: "Screen to render: library, rename, settings, or onboarding.")
+    private var screen: DemoSnapshotScreen = .library
+
     func run() async throws {
         try await render()
     }
@@ -43,11 +53,27 @@ struct DemoSnapshot: AsyncParsableCommand {
     @MainActor
     private func render() throws {
         let model = ScribeAppModel(root: URL(fileURLWithPath: "/tmp/scribe-demo"), demo: true)
-        let content = ScribeAppView(model: model)
-            .frame(width: 1_440, height: 1_024)
+        let size: CGSize
+        let selectedView: AnyView
+        switch screen {
+        case .library:
+            size = CGSize(width: 1_440, height: 1_024)
+            selectedView = AnyView(ScribeAppView(model: model))
+        case .rename:
+            size = CGSize(width: 500, height: 220)
+            selectedView = AnyView(MeetingRenameEditor(model: model, meeting: model.meetings[0]))
+        case .settings:
+            size = CGSize(width: 680, height: 760)
+            selectedView = AnyView(ScribeSettingsView(model: model))
+        case .onboarding:
+            size = CGSize(width: 760, height: 570)
+            selectedView = AnyView(ScribeOnboardingView(model: model))
+        }
+        let content = selectedView
+            .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, .light)
         let hosting = NSHostingView(rootView: content)
-        hosting.frame = NSRect(x: 0, y: 0, width: 1_440, height: 1_024)
+        hosting.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(
             contentRect: hosting.bounds,
             styleMask: [.borderless],
@@ -230,7 +256,7 @@ final class AppController {
     private func installControlObservers() {
         let center = DistributedNotificationCenter.default()
         controlObservers.append(center.addObserver(
-            forName: QuillControlNotification.start,
+            forName: ScribeControlNotification.start,
             object: nil,
             queue: .main
         ) { [weak self] notification in
@@ -248,14 +274,14 @@ final class AppController {
             }
         })
         controlObservers.append(center.addObserver(
-            forName: QuillControlNotification.stop,
+            forName: ScribeControlNotification.stop,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.stopSession() }
         })
         controlObservers.append(center.addObserver(
-            forName: QuillControlNotification.quit,
+            forName: ScribeControlNotification.quit,
             object: nil,
             queue: .main
         ) { [weak self] _ in

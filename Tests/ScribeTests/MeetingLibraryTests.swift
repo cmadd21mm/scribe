@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct MeetingLibraryTests {
     @Test("The library reads generated meeting folders and local user state")
@@ -42,5 +42,42 @@ struct MeetingLibraryTests {
         #expect(meeting.searchableText.contains("beta scope"))
         #expect(meeting.searchableText.contains("simpler setup"))
         #expect(meeting.searchableText.contains("jordan"))
+    }
+
+    @Test("Renaming a meeting updates its folder, metadata, and Markdown titles")
+    func renamesMeetingEverywhere() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-rename-\(UUID().uuidString)", isDirectory: true)
+        let directory = root.appendingPathComponent("2026-08-17 1002 - Untitled meeting", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        try Data(#"{"state":"complete","started":"2026-08-17T14:02:00Z","duration_seconds":60,"title":"Untitled meeting"}"#.utf8)
+            .write(to: directory.appendingPathComponent("meta.json"))
+        try Data("# Untitled meeting\n\n## Summary\n\nUseful context.".utf8)
+            .write(to: directory.appendingPathComponent("note.md"))
+        try Data("# Untitled meeting\n\n## Transcript\n".utf8)
+            .write(to: directory.appendingPathComponent("transcript.md"))
+
+        let original = try #require(MeetingLibraryReader.read(directory: directory))
+        let renamed = try MeetingLibraryReader.rename(original, to: "Customer kickoff")
+
+        #expect(renamed.title == "Customer kickoff")
+        #expect(renamed.directory.lastPathComponent.contains("Customer kickoff"))
+        #expect(!FileManager.default.fileExists(atPath: directory.path))
+        let metadata = try String(contentsOf: renamed.directory.appendingPathComponent("meta.json"), encoding: .utf8)
+        let note = try String(contentsOf: renamed.directory.appendingPathComponent("note.md"), encoding: .utf8)
+        let transcript = try String(contentsOf: renamed.directory.appendingPathComponent("transcript.md"), encoding: .utf8)
+        #expect(metadata.contains("Customer kickoff"))
+        #expect(note.hasPrefix("# Customer kickoff"))
+        #expect(transcript.hasPrefix("# Customer kickoff"))
+    }
+
+    @Test("An empty meeting name is rejected without changing files")
+    func rejectsEmptyRename() throws {
+        let meeting = MeetingRecord.demoMeetings().first!
+        #expect(throws: MeetingLibraryReader.LibraryError.self) {
+            try MeetingLibraryReader.rename(meeting, to: "  ")
+        }
     }
 }

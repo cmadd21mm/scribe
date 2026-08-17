@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct ConfigTests {
     @Test("Configuration parses every supported local-first setting")
@@ -14,6 +14,7 @@ struct ConfigTests {
           "call_end_delay_seconds": 20,
           "minimum_free_disk_gb": 3.5,
           "prompt_for_calls": false,
+          "note_style": "action-focused",
           "mic_voice_processing": true,
           "transcription": {"enabled": true, "engine": "parakeet"},
           "summarization": {
@@ -32,6 +33,7 @@ struct ConfigTests {
         #expect(document.minimumFreeDiskGB == 3.5)
         #expect(document.micVoiceProcessing == true)
         #expect(document.promptForCalls == false)
+        #expect(document.noteStyle == "action-focused")
         #expect(document.transcription?.engine == "parakeet")
         #expect(document.summarization?.backend == "llama.cpp")
         #expect(document.summarization?.modelPath == "/models/local.gguf")
@@ -41,6 +43,6 @@ struct ConfigTests {
     @Test("Unknown keys are forward-compatible")
     func ignoresUnknownKeys() throws {
         let document = try Config.parse(Data(#"{"future_option":true}"#.utf8))
-        #expect(document == QuillConfiguration())
+        #expect(document == ScribeConfiguration())
     }
 }

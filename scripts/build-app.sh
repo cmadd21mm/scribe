@@ -13,7 +13,7 @@ swift build -c release --product scribe
 rm -rf "$APP_DIR" "$ICONSET_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$ICONSET_DIR"
 cp ".build/release/scribe" "$APP_DIR/Contents/MacOS/Scribe"
-cp "Sources/quill/Info.plist" "$APP_DIR/Contents/Info.plist"
+cp "Sources/Scribe/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 make_icon() {
     size=$1

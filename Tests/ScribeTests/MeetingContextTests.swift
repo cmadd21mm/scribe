@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct MeetingContextTests {
     @Test("Calendar matching prefers a concurrent non-all-day event nearest its start")
@@ -49,7 +49,7 @@ struct MeetingContextTests {
     @Test("A meeting folder starts with an Obsidian-safe note and versioned metadata")
     func meetingFolderLayout() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("quill-layout-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("scribe-layout-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
 

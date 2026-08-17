@@ -1,7 +1,7 @@
 import CoreAudio
 import Testing
 
-@testable import quill
+@testable import Scribe
 
 struct AudioProcessSelectorTests {
     @Test("Capture targets include only configured processes producing output")
