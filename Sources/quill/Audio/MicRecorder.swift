@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import os.lock
 
@@ -14,6 +14,13 @@ import os.lock
 /// liveness check catches routes where even the correct graph stays silent
 /// and restarts capture raw.
 final class MicRecorder: @unchecked Sendable {
+    private final class SendableAudioBuffer: @unchecked Sendable {
+        let value: AVAudioPCMBuffer
+
+        init(_ value: AVAudioPCMBuffer) {
+            self.value = value
+        }
+    }
     enum RecorderError: Error, CustomStringConvertible {
         case engineStartFailed(Error)
         case fileCreationFailed(Error)
@@ -267,16 +274,21 @@ final class MicRecorder: @unchecked Sendable {
                 if sameRate {
                     try converter.convert(to: mono, from: buffer)
                 } else {
-                    var fed = false
+                    let source = SendableAudioBuffer(buffer)
+                    let fed = OSAllocatedUnfairLock(initialState: false)
                     var conversionError: NSError?
                     converter.convert(to: mono, error: &conversionError) { _, status in
-                        if fed {
+                        let shouldFeed = fed.withLock { value in
+                            guard !value else { return false }
+                            value = true
+                            return true
+                        }
+                        if !shouldFeed {
                             status.pointee = .noDataNow
                             return nil
                         }
-                        fed = true
                         status.pointee = .haveData
-                        return buffer
+                        return source.value
                     }
                     if let conversionError { throw conversionError }
                 }

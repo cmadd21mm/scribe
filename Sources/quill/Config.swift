@@ -14,6 +14,23 @@ import Foundation
 /// directory as its argument — after the transcript is written, or right
 /// after recording when transcription is disabled.
 enum Config {
+    /// Native call apps plus the major browsers used by Meet and Slack
+    /// huddles. Users can replace this list with `call_apps` in config.
+    static let defaultCallAppBundleIDs: Set<String> = [
+        "us.zoom.xos",
+        "com.microsoft.teams2",
+        "com.microsoft.teams",
+        "com.tinyspeck.slackmacgap",
+        "com.apple.FaceTime",
+        "com.hnc.Discord",
+        "com.cisco.webexmeetingsapp",
+        "Cisco-Systems.Spark",
+        "com.google.Chrome",
+        "com.apple.Safari",
+        "com.microsoft.edgemac",
+        "org.mozilla.firefox",
+    ]
+
     static let path = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/quill/config.json")
 
@@ -55,6 +72,13 @@ enum Config {
     /// recording meetings through the speakers.
     static func micVoiceProcessing() -> Bool {
         load()?["mic_voice_processing"] as? Bool ?? false
+    }
+
+    static func callAppBundleIDs() -> Set<String> {
+        guard let configured = load()?["call_apps"] as? [String] else {
+            return defaultCallAppBundleIDs
+        }
+        return Set(configured.filter { !$0.isEmpty })
     }
 
     /// Parse the config file. A malformed config is reported on stderr rather

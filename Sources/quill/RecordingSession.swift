@@ -4,7 +4,7 @@ import Foundation
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
 /// are separate on purpose — whisper does better on clean single-source audio,
 /// and two tracks give free two-party diarization.
-final class RecordingSession {
+final class RecordingSession: @unchecked Sendable {
     let dir: URL
     let startedAt = Date()
 
@@ -41,8 +41,16 @@ final class RecordingSession {
 
     /// Start both tracks. If the mic fails after the system tap started, the
     /// tap is torn down so we never run half a session silently.
-    func start() throws {
-        try system.start(writingTo: dir.appendingPathComponent("system.caf"))
+    func start(allowedBundleIDs: Set<String> = Config.callAppBundleIDs()) throws {
+        let processes = try AudioProcessDiscovery.snapshots()
+        let targets = AudioProcessSelector.captureTargets(
+            from: processes,
+            allowedBundleIDs: allowedBundleIDs
+        )
+        try system.start(
+            writingTo: dir.appendingPathComponent("system.caf"),
+            processObjectIDs: targets.map(\.objectID)
+        )
         do {
             try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
         } catch {

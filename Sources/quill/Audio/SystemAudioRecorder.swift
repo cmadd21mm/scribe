@@ -16,6 +16,7 @@ final class SystemAudioRecorder {
         case ioProcCreationFailed(OSStatus)
         case deviceStartFailed(OSStatus)
         case fileCreationFailed(Error)
+        case noEligibleProcesses
 
         var description: String {
             switch self {
@@ -26,6 +27,8 @@ final class SystemAudioRecorder {
             case .ioProcCreationFailed(let s): return "IO proc creation failed (OSStatus \(s))"
             case .deviceStartFailed(let s): return "device start failed (OSStatus \(s))"
             case .fileCreationFailed(let e): return "output file creation failed: \(e)"
+            case .noEligibleProcesses:
+                return "no configured call app is currently producing audio; add its bundle ID to call_apps or start the call first"
             }
         }
     }
@@ -62,10 +65,11 @@ final class SystemAudioRecorder {
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
     /// extension — CAF needs no finalization pass, so a crash mid-meeting
     /// loses nothing already written).
-    func start(writingTo url: URL) throws {
+    func start(writingTo url: URL, processObjectIDs: [AudioObjectID]) throws {
         guard !isRecording else { return }
+        guard !processObjectIDs.isEmpty else { throw RecorderError.noEligibleProcesses }
 
-        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
         description.name = "quill system tap"
         description.isPrivate = true
         description.muteBehavior = .unmuted
