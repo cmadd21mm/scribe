@@ -2,11 +2,11 @@
 
 **Source visual truth**
 
-`/Users/charlesnmadden/.codex/generated_images/01a01174-b819-7893-b11f-ed4816f9e42d/exec-76f15cc5-3970-46f1-8e1e-6d29b64ff107.png`
+`docs/design/scribe-reference.png`
 
 **Rendered implementation**
 
-`/Users/charlesnmadden/Documents/Codex/2026-08-17/do/work/quill-source/scribe-demo-final.png`
+`docs/images/scribe-library.png`
 
 **Comparison setup**
 
@@ -15,10 +15,10 @@
 - Target viewport: 1440 × 1024 points at density 1 for the offscreen SwiftUI
   regression renderer.
 - Full-view normalization: each artifact was aspect-fit into a 720 × 512 px
-  region and placed side by side in `scribe-design-final-comparison.png`.
+  region and placed side by side in `docs/design/full-comparison.png`.
 - Focused normalization: each detail pane was normalized to 1440 × 1024,
   cropped to the same 1040 × 760 region, scaled to 720 × 526, and placed side
-  by side in `scribe-design-focused.png`.
+  by side in `docs/design/focused-comparison.png`.
 
 ## Findings
 
