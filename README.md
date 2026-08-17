@@ -62,7 +62,7 @@ builds are ad-hoc signed; macOS may ask you to confirm opening one through
 You need macOS 15+, Xcode 16+, and Swift 6.
 
 ```sh
-git clone <repository-url> scribe
+git clone https://github.com/cmadd21mm/scribe.git
 cd scribe
 swift test
 sh scripts/build-app.sh
