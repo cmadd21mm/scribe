@@ -1,25 +1,50 @@
 import Foundation
 
-/// Optional user config at ~/.config/quill/config.json:
-///
-///     {
-///       "recordings_dir": "~/Recordings",
-///       "transcription": { "enabled": true, "engine": "parakeet" },
-///       "mic_voice_processing": true,
-///       "on_stop": "my-hook"
-///     }
-///
-/// Resolution order for the recordings root: --out flag > config file >
-/// ~/Recordings. `on_stop` is a shell command spawned with the session
-/// directory as its argument — after the transcript is written, or right
-/// after recording when transcription is disabled.
+struct QuillConfiguration: Codable, Equatable, Sendable {
+    struct Transcription: Codable, Equatable, Sendable {
+        var enabled: Bool? = nil
+        var engine: String? = nil
+    }
+
+    struct Summarization: Codable, Equatable, Sendable {
+        var backend: String? = nil
+        var executable: String? = nil
+        var modelPath: String? = nil
+        var predictionTokens: Int? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case backend, executable
+            case modelPath = "model_path"
+            case predictionTokens = "prediction_tokens"
+        }
+    }
+
+    var recordingsDir: String? = nil
+    var transcription: Transcription? = nil
+    var summarization: Summarization? = nil
+    var micVoiceProcessing: Bool? = nil
+    var callApps: [String]? = nil
+    var callPromptDelaySeconds: Double? = nil
+    var callEndDelaySeconds: Double? = nil
+    var minimumFreeDiskGB: Double? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case recordingsDir = "recordings_dir"
+        case transcription, summarization
+        case micVoiceProcessing = "mic_voice_processing"
+        case callApps = "call_apps"
+        case callPromptDelaySeconds = "call_prompt_delay_seconds"
+        case callEndDelaySeconds = "call_end_delay_seconds"
+        case minimumFreeDiskGB = "minimum_free_disk_gb"
+    }
+}
+
 enum Config {
     enum LocalSummarizerConfiguration {
         case available(any MeetingSummarizer)
         case unavailable(String)
     }
-    /// Native call apps plus the major browsers used by Meet and Slack
-    /// huddles. Users can replace this list with `call_apps` in config.
+
     static let defaultCallAppBundleIDs: Set<String> = [
         "us.zoom.xos",
         "com.microsoft.teams2",
@@ -41,76 +66,58 @@ enum Config {
     static let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Recordings", isDirectory: true)
 
-    /// The configured recordings root, or nil if no config file / no key.
+    static func parse(_ data: Data) throws -> QuillConfiguration {
+        try JSONDecoder().decode(QuillConfiguration.self, from: data)
+    }
+
     static func recordingsDir() -> URL? {
-        guard let dir = load()?["recordings_dir"] as? String, !dir.isEmpty else { return nil }
-        return URL(fileURLWithPath: (dir as NSString).expandingTildeInPath, isDirectory: true)
+        guard let dir = load()?.recordingsDir, !dir.isEmpty else { return nil }
+        return URL(fileURLWithPath: expand(dir), isDirectory: true)
     }
 
-    /// Shell command to spawn after each session's transcript is written (or
-    /// after recording, if transcription is disabled), or nil.
-    static func onStop() -> String? {
-        guard let cmd = load()?["on_stop"] as? String, !cmd.isEmpty else { return nil }
-        return cmd
-    }
-
-    /// Whether finished recordings are transcribed automatically. Default on.
     static func transcriptionEnabled() -> Bool {
-        transcription()?["enabled"] as? Bool ?? true
+        load()?.transcription?.enabled ?? true
     }
 
-    /// Configured engine name. Only "parakeet" ships today; the coordinator
-    /// warns and falls back for anything else.
     static func transcriptionEngine() -> String {
-        transcription()?["engine"] as? String ?? "parakeet"
+        load()?.transcription?.engine ?? "parakeet"
     }
 
-    private static func transcription() -> [String: Any]? {
-        load()?["transcription"] as? [String: Any]
-    }
-
-    /// Apple voice processing (acoustic echo cancellation) on the mic, so
-    /// speaker playback doesn't bleed into the mic track and get transcribed
-    /// as "me". Default off — the live voice unit ducks all other playback,
-    /// and on headphones there's no echo to cancel anyway. Set true when
-    /// recording meetings through the speakers.
     static func micVoiceProcessing() -> Bool {
-        load()?["mic_voice_processing"] as? Bool ?? false
+        load()?.micVoiceProcessing ?? false
     }
 
     static func callAppBundleIDs() -> Set<String> {
-        guard let configured = load()?["call_apps"] as? [String] else {
-            return defaultCallAppBundleIDs
-        }
+        guard let configured = load()?.callApps else { return defaultCallAppBundleIDs }
         return Set(configured.filter { !$0.isEmpty })
     }
 
     static func callPromptDelay() -> TimeInterval {
-        load()?["call_prompt_delay_seconds"] as? TimeInterval ?? 8
+        max(0, load()?.callPromptDelaySeconds ?? 8)
     }
 
     static func callEndDelay() -> TimeInterval {
-        load()?["call_end_delay_seconds"] as? TimeInterval ?? 10
+        max(0, load()?.callEndDelaySeconds ?? 10)
     }
 
     static func minimumFreeDiskBytes() -> Int64 {
-        let gigabytes = load()?["minimum_free_disk_gb"] as? Double ?? 2
-        return Int64(max(0, gigabytes) * 1_000_000_000)
+        let gigabytes = max(0, load()?.minimumFreeDiskGB ?? 2)
+        return Int64(gigabytes * 1_000_000_000)
     }
 
     static func localSummarizer() -> LocalSummarizerConfiguration {
-        guard let summary = load()?["summarization"] as? [String: Any] else {
+        guard let summary = load()?.summarization else {
             return .unavailable("no local summarization model is configured")
         }
-        guard summary["backend"] as? String == "llama.cpp" else {
+        guard summary.backend == "llama.cpp" else {
             return .unavailable("summarization.backend must be llama.cpp")
         }
-        guard let executablePath = summary["executable"] as? String,
-              let modelPath = summary["model_path"] as? String else {
+        guard let executablePath = summary.executable,
+              let modelPath = summary.modelPath else {
             return .unavailable("llama.cpp executable and model_path must be configured")
         }
-        let executable = URL(fileURLWithPath: (executablePath as NSString).expandingTildeInPath)
-        let model = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
+        let executable = URL(fileURLWithPath: expand(executablePath))
+        let model = URL(fileURLWithPath: expand(modelPath))
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             return .unavailable("llama.cpp executable was not found at \(executable.path)")
         }
@@ -120,35 +127,30 @@ enum Config {
         return .available(LlamaCppSummarizer(
             executable: executable,
             model: model,
-            predictionTokens: summary["prediction_tokens"] as? Int ?? 1_200
+            predictionTokens: summary.predictionTokens ?? 1_200
         ))
     }
 
-    /// Parse the config file. A malformed config is reported on stderr rather
-    /// than silently ignored — recordings landing in an unexpected place is
-    /// worse than a warning.
-    private static func load() -> [String: Any]? {
+    static func resolveRoot(cliOverride: String?) -> URL {
+        if let cliOverride {
+            return URL(fileURLWithPath: expand(cliOverride), isDirectory: true)
+        }
+        return recordingsDir() ?? defaultRoot
+    }
+
+    private static func load() -> QuillConfiguration? {
         guard FileManager.default.fileExists(atPath: path.path) else { return nil }
-        guard
-            let data = try? Data(contentsOf: path),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
+        do {
+            return try parse(Data(contentsOf: path))
+        } catch {
             FileHandle.standardError.write(Data(
-                "warning: \(path.path) is not valid JSON — ignoring config\n".utf8
+                "warning: \(path.path) is invalid (\(error)) — using defaults\n".utf8
             ))
             return nil
         }
-        return json
     }
 
-    /// Resolve the recordings root from an optional CLI override.
-    static func resolveRoot(cliOverride: String?) -> URL {
-        if let cliOverride {
-            return URL(
-                fileURLWithPath: (cliOverride as NSString).expandingTildeInPath,
-                isDirectory: true
-            )
-        }
-        return recordingsDir() ?? defaultRoot
+    private static func expand(_ path: String) -> String {
+        (path as NSString).expandingTildeInPath
     }
 }

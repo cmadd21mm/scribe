@@ -1,127 +1,206 @@
-# quill
+# Quill
 
-A minimal, fully local macOS meeting recorder + transcriber. One menu-bar
-click records your mic and all system audio as two separate tracks; when you
-stop, quill transcribes both on-device and writes a speaker-tagged transcript.
-Nothing ever leaves the machine.
+Quill is a local-first macOS meeting notes system. It records your microphone
+and only the configured call processes, transcribes both sides on-device, and
+writes a plain Markdown note with a summary, decisions, action items, and open
+questions. There are no accounts, bots, telemetry, cloud APIs, or runtime
+network calls.
 
-Named for the feather. Sibling of [parrot](https://github.com/digimata/parrot), same skeleton: single
-Swift binary, menu-bar tray, no app bundle.
+Quill never starts a recording by itself. When a configured app has live audio
+input and output for several seconds, Quill asks **Record / Not now**. You can
+also start and stop from the menu bar or CLI. Declining suppresses further
+prompts until that call ends.
 
-## Install
+## Requirements
+
+- macOS 15 or later
+- Swift 6 / Xcode 16 or later to build
+- Apple Silicon recommended for local transcription
+- A pre-downloaded Parakeet model for transcription
+- Optional: `llama.cpp` plus a local GGUF instruct model for structured notes
+
+## Build and install
 
 ```sh
-cd quill
+swift test
 swift build -c release
 sudo cp .build/release/quill /usr/local/bin/quill
-quill install --launch-at-login   # optional — runs in the background on login
+
+# This is Quill's only network-capable runtime command. Run it intentionally.
+quill models download-transcription
+
+# Optional background menu-bar daemon.
+quill install --launch-at-login
 ```
 
-**Requires:** macOS 15+ (Core Audio process taps for system audio — no
-virtual device, no kernel extension). Apple Silicon recommended for
-transcription speed.
+Run `quill doctor` before the first real meeting. Permissions live at:
 
-## How to use
+- System Settings → Privacy & Security → Microphone
+- System Settings → Privacy & Security → Screen & System Audio Recording
+- System Settings → Privacy & Security → Calendars (optional)
 
-1. **Run it** (`quill` in a terminal, or the LaunchAgent).
-2. **Click the feather in the menu bar → Start recording.** First use prompts
-   for microphone and System Audio Recording permissions. While recording, the
-   icon turns red with a running elapsed counter, and macOS shows the purple
-   recording indicator.
-3. **Click → Stop recording** when the meeting ends. Transcription starts
-   automatically (the menu shows progress); a notification fires when the
-   transcript is ready.
+Calendar denial never blocks recording; Quill falls back to the call app and
+timestamp for the title.
 
-Each session lands in `~/Recordings/<yyyy.MM.dd-HHmm>/`:
+## What gets captured
 
-| File | Contents |
-|---|---|
-| `mic.caf` | your side (default input device, AAC) |
-| `system.caf` | everything the Mac played — the other side of the call (AAC) |
-| `meta.json` | start/end timestamps, duration, per-track start offsets |
-| `transcript.json` | canonical transcript — engine provenance + timed, speaker-tagged segments |
-| `transcript.md` | the same transcript rendered for reading |
-| `transcribe.log` | transcription progress/errors for this session |
+Quill resolves configured bundle IDs to Core Audio process object IDs and
+constructs a non-global process tap. Output from other processes—Spotify,
+Messages notification sounds, and unrelated apps—is excluded. Microphone audio
+is a separate track, which yields reliable `me` / `them` transcript labels.
 
-Two tracks on purpose: speech models do better on clean single-source audio,
-and mic-vs-system is free two-party diarization — `me` vs `them` with no
-speaker-identification model. CAF on purpose: unlike m4a, it needs no
-finalization pass — if the process dies mid-meeting, everything already
-written is still readable.
+Defaults cover:
 
-## Transcription
+- Zoom: `us.zoom.xos`
+- Microsoft Teams: `com.microsoft.teams2`, `com.microsoft.teams`
+- Slack huddles: `com.tinyspeck.slackmacgap`
+- FaceTime: `com.apple.FaceTime`
+- Discord: `com.hnc.Discord`
+- Webex: `com.cisco.webexmeetingsapp`, `Cisco-Systems.Spark`
+- Google Meet and browser huddles: Chrome, Safari, Edge, and Firefox
 
-Built in, on-device, automatic. The default engine is **Parakeet TDT 0.6B v2**
-(English) via [FluidAudio](https://github.com/FluidInference/FluidAudio)'s
-Core ML port — roughly 20 seconds per hour of audio on Apple Silicon. Models
-(~600 MB) download once on first transcription; `quill doctor` tells you
-whether they're already cached so you're never downloading after an important
-meeting.
+Core Audio isolates processes, not tabs. If a browser routes multiple tabs
+through the same audio process, macOS does not expose a public API that can
+separate those tabs; use a dedicated browser window/profile during a recorded
+meeting when tab isolation matters.
 
-Each track is transcribed separately, shifted by its start offset so both
-share one clock, and merged by timestamp. Jobs run in a serial queue — you can
-start a new recording while the last one transcribes. Unfinished jobs resume
-on next launch (the filesystem is the queue: a session with `meta.json` but no
-`transcript.json` is pending). Failures append to the session's
-`transcribe.log` and never block later jobs.
+For an unknown app, find its bundle ID and explicitly select it:
 
-The engine sits behind a small protocol; a Whisper engine (WhisperKit
-large-v3-turbo) is planned as the fallback / re-transcription option.
+```sh
+quill apps
+quill start --bundle-id com.example.call --title "Customer interview"
+quill stop
+```
 
-## Config
+## Output
 
-Optional, at `~/.config/quill/config.json`:
+The default root is `~/Recordings`. Every meeting is an Obsidian-safe,
+chronologically sortable folder:
+
+```text
+2026-08-17 1430 - Product weekly/
+├── mic.caf
+├── system.caf
+├── meta.json
+├── transcript.json
+├── transcript.md
+├── note.md
+└── transcribe.log
+```
+
+- `mic.caf`: your microphone, incrementally written AAC in a crash-tolerant CAF
+- `system.caf`: only the selected call processes, incrementally written
+- `meta.json`: versioned schema, state, calendar context, app, attendees, times,
+  track files, and alignment offsets
+- `transcript.json`: completion marker and canonical timed segments
+- `transcript.md`: readable speaker-tagged transcript
+- `note.md`: summary, decisions, action items, and open questions
+- `transcribe.log`: local processing diagnostics
+
+At recording start, `meta.json` is atomically written with `state: recording`.
+On a clean stop it becomes `state: complete`. If Quill is force-quit, the next
+launch marks the session `interrupted`, preserves the existing audio, and
+queues it for transcription. A configurable free-space reserve is checked
+before capture begins.
+
+## Local models
+
+Transcription uses FluidAudio's on-device Parakeet TDT 0.6B v2 model. Normal
+recording and transcription never download it. If it is absent, processing
+fails visibly with instructions to run the explicit model command:
+
+```sh
+quill models download-transcription
+```
+
+Summarization is behind the `MeetingSummarizer` protocol. The included backend
+executes a configured local `llama.cpp` binary and GGUF model. Quill never
+downloads a summarization model and never falls back to a network service. If
+the backend is absent or fails, `transcript.md` is still written and `note.md`
+states exactly why structured notes were not generated.
+
+## Configuration
+
+Create `~/.config/quill/config.json`:
 
 ```json
 {
   "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "parakeet" },
-  "on_stop": "my-hook"
+  "call_apps": [
+    "us.zoom.xos",
+    "com.microsoft.teams2",
+    "com.tinyspeck.slackmacgap",
+    "com.apple.FaceTime",
+    "com.hnc.Discord",
+    "com.cisco.webexmeetingsapp",
+    "Cisco-Systems.Spark",
+    "com.google.Chrome",
+    "com.apple.Safari",
+    "com.microsoft.edgemac",
+    "org.mozilla.firefox"
+  ],
+  "call_prompt_delay_seconds": 8,
+  "call_end_delay_seconds": 10,
+  "minimum_free_disk_gb": 2,
+  "mic_voice_processing": false,
+  "transcription": {
+    "enabled": true,
+    "engine": "parakeet"
+  },
+  "summarization": {
+    "backend": "llama.cpp",
+    "executable": "/opt/homebrew/bin/llama-cli",
+    "model_path": "~/Models/local-instruct.gguf",
+    "prediction_tokens": 1200
+  }
 }
 ```
 
-- `recordings_dir` — where sessions land. Resolution order: `--out` flag >
-  config > `~/Recordings`.
-- `transcription.enabled` — set `false` to just record.
-- `mic_voice_processing` — Apple's echo cancellation on the mic (default off).
-  Set `true` when recording meetings through the speakers, so playback doesn't
-  bleed into the mic track and get transcribed twice as "me". The trade: while
-  the voice unit is live, macOS ducks other playback slightly (`.min` ducking
-  is configured, but it can't be zeroed). On headphones there's no echo to
-  cancel, so raw capture is the better default.
-- `on_stop` — shell command spawned with the session directory as its
-  argument, **after the transcript is written** (or right after recording if
-  transcription is disabled). Wire it to whatever comes next: summarization,
-  filing, indexing.
+Omit `summarization` to keep transcripts without AI notes. Setting
+`transcription.enabled` to `false` keeps audio and metadata only. Replacing
+`call_apps` changes both prompt detection and default manual capture targets.
 
 ## CLI
 
 ```sh
-quill                        # run the menu-bar daemon (^C to quit)
-quill run --out <dir>        # custom recordings root (default ~/Recordings)
-quill doctor                 # check permissions, recordings folder, models
+quill run [--out <dir>]                 # menu-bar daemon + call prompts
+quill start [--bundle-id <id>] [--title <text>]
+quill stop
+quill quit
+quill open [--out <dir>]
+quill apps                              # active audio process bundle IDs
+quill transcribe <meeting-dir>          # transcript + structured note
+quill note <meeting-dir>                # regenerate note.md locally
+quill recover [--out <dir>]             # repair interrupted sessions
+quill doctor
+quill models download-transcription [--force]
 quill install --launch-at-login
 quill install --uninstall
 ```
 
-## Stack
+`start`, `stop`, and `quit` send local distributed notifications to the running
+daemon. They do not contact a server. `start --bundle-id` is the manual path for
+an unknown call app.
 
-- **Swift** — single SPM executable target
-- **Core Audio process tap** (`AudioHardwareCreateProcessTap`, macOS 14.2+) —
-  system audio capture via a private aggregate device
-- **AVAudioEngine** — mic capture
-- **AVAudioFile** — streaming AAC encode into CAF
-- **FluidAudio / Parakeet** — on-device Core ML transcription
-- **NSStatusItem** — the whole UI
+## Development and verification
 
-## Gotchas
+```sh
+sh scripts/check-no-runtime-network.sh
+swift test
+swift build -c release
+```
 
-- A global tap records *everything* the Mac plays — notification dings,
-  music, all of it. Don't play Spotify during meetings (or ask for a
-  per-process picker if it bothers you).
-- If recordings come out silent, check System Settings → Privacy & Security →
-  Screen & System Audio Recording.
-- Parakeet v2 is English-only. Other languages will come with the Whisper
-  engine.
-- The binary embeds its Info.plist (`__TEXT,__info_plist`) so TCC can
-  attribute permissions to quill itself when running as a LaunchAgent.
+Pure tests cover process selection, call prompt state, calendar matching,
+filename generation, config parsing, folder layout, recovery scanning, disk
+policy, model-output parsing, and note formatting. Core Audio and EventKit
+still require hands-on testing on a real Mac; follow [MANUAL-TEST.md](MANUAL-TEST.md)
+and do not infer hardware success from unit tests.
+
+## Design constraints
+
+- Swift + SPM only; no Electron, Python, or Node runtime
+- Plain files only; no database
+- No accounts, cloud transcription, cloud summaries, meeting bots, analytics,
+  crash reporting, or update checks
+- The only network-capable runtime path is the explicit transcription-model
+  download subcommand, guarded by CI

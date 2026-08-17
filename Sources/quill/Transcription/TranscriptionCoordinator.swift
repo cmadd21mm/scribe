@@ -24,13 +24,25 @@ actor TranscriptionCoordinator {
         statusHandler = handler
     }
 
-    /// Queue a finished session. With transcription disabled in config, the
-    /// on_stop hook still fires — it just gets an untranscribed folder.
-    func enqueue(_ sessionDir: URL) {
-        guard Config.transcriptionEnabled() else {
-            runHook(for: sessionDir)
-            return
+    func processNow(_ sessionDir: URL) async throws {
+        do {
+            try await transcribe(sessionDir)
+            await releaseEngine()
+        } catch {
+            await releaseEngine()
+            throw error
         }
+    }
+
+    private func releaseEngine() async {
+        await engine?.release()
+        engine = nil
+    }
+
+    /// Queue a finished session. With transcription disabled, the local audio
+    /// and metadata remain available and no post-processing process is run.
+    func enqueue(_ sessionDir: URL) {
+        guard Config.transcriptionEnabled() else { return }
         queue.append(sessionDir)
         drainIfIdle()
     }
@@ -78,7 +90,6 @@ actor TranscriptionCoordinator {
             do {
                 try await transcribe(dir)
                 notifyUser(title: "quill — transcript ready", body: dir.lastPathComponent)
-                runHook(for: dir)
             } catch {
                 log(dir, "transcription failed: \(error)")
                 lastFailure = dir.lastPathComponent
@@ -158,21 +169,6 @@ actor TranscriptionCoordinator {
         try await engine.prepare()
         self.engine = engine
         return engine
-    }
-
-    /// Fires the configured on_stop shell command with the session directory
-    /// as its sole argument, after the transcript exists (or immediately after
-    /// recording when transcription is disabled).
-    private func runHook(for dir: URL) {
-        guard let cmd = Config.onStop() else { return }
-        let task = Process()
-        task.launchPath = "/bin/sh"
-        task.arguments = ["-c", "\(cmd) \"$0\"", dir.path]
-        do {
-            try task.run()
-        } catch {
-            log(dir, "on_stop hook failed to launch: \(error)")
-        }
     }
 
     private func log(_ dir: URL, _ message: String) {

@@ -3,11 +3,24 @@ import ArgumentParser
 import Foundation
 
 @main
-struct Quill: ParsableCommand {
+struct Quill: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "quill",
         abstract: "Local meeting recorder + transcriber. Records mic and system audio as two tracks, then transcribes on-device.",
-        subcommands: [Run.self, Doctor.self, Install.self],
+        subcommands: [
+            Run.self,
+            StartRecording.self,
+            StopRecording.self,
+            OpenRecordings.self,
+            QuitDaemon.self,
+            ListAudioApps.self,
+            TranscribeSession.self,
+            RegenerateNote.self,
+            RecoverSessions.self,
+            Models.self,
+            Doctor.self,
+            Install.self,
+        ],
         defaultSubcommand: Run.self
     )
 }
@@ -86,6 +99,7 @@ final class AppController {
     private var ticker: Timer?
     private var detectionTicker: Timer?
     private var isStarting = false
+    private var controlObservers: [NSObjectProtocol] = []
     private var detector = CallDetectionStateMachine(
         promptAfter: Config.callPromptDelay(),
         endAfter: Config.callEndDelay()
@@ -117,6 +131,7 @@ final class AppController {
             [weak self] _ in
             MainActor.assumeIsolated { self?.pollForCalls() }
         }
+        installControlObservers()
 
         Task { [transcription, root] in
             await transcription.setStatusHandler { status in
@@ -131,8 +146,48 @@ final class AppController {
     /// Stop any live session cleanly (finalizing files) and exit.
     func shutdown() {
         detectionTicker?.invalidate()
+        for observer in controlObservers {
+            DistributedNotificationCenter.default().removeObserver(observer)
+        }
+        controlObservers.removeAll()
         stopSession()
         NSApp.terminate(nil)
+    }
+
+    private func installControlObservers() {
+        let center = DistributedNotificationCenter.default()
+        controlObservers.append(center.addObserver(
+            forName: QuillControlNotification.start,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let bundleIDs = notification.userInfo?["bundle_ids"] as? [String]
+            let title = notification.userInfo?["title"] as? String ?? "Manual meeting"
+            MainActor.assumeIsolated {
+                guard let self, self.session == nil else { return }
+                Task {
+                    await self.startSession(
+                        allowedBundleIDs: bundleIDs.map(Set.init),
+                        fallbackTitle: title,
+                        sourceBundleID: bundleIDs?.count == 1 ? bundleIDs?.first : nil
+                    )
+                }
+            }
+        })
+        controlObservers.append(center.addObserver(
+            forName: QuillControlNotification.stop,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopSession() }
+        })
+        controlObservers.append(center.addObserver(
+            forName: QuillControlNotification.quit,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.shutdown() }
+        })
     }
 
     private func toggle() {
