@@ -39,7 +39,7 @@ enum DoctorReport {
             return Check(
                 name: "microphone",
                 status: .fail("denied"),
-                remediation: "System Settings → Privacy & Security → Microphone → enable for quill (or your terminal)"
+                remediation: "System Settings → Privacy & Security → Microphone → enable Scribe (or your terminal)"
             )
         @unknown default:
             return Check(name: "microphone", status: .fail("unknown state"), remediation: nil)
@@ -93,7 +93,7 @@ enum DoctorReport {
         return Check(
             name: "transcription",
             status: .warn("parakeet models not installed locally (~600 MB)"),
-            remediation: "run `quill models download-transcription` while online before recording"
+            remediation: "run `scribe models download-transcription` while online before recording"
         )
     }
 

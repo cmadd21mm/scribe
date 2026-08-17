@@ -1,4 +1,4 @@
-# Quill manual test checklist
+# Scribe manual test checklist
 
 These checks exercise Core Audio, TCC permissions, EventKit, real call apps,
 and `llama.cpp`. Unit tests cannot prove these paths. Run the release binary on
@@ -9,10 +9,10 @@ macOS 15+ with headphones first, then repeat one call on speakers with
 
 1. Run `swift test` and `swift build -c release`.
 2. Run `sh scripts/check-no-runtime-network.sh`.
-3. Install `.build/release/quill` and run `quill models download-transcription`.
-4. Run `quill doctor`; resolve any hard failure.
-5. Start `quill run` and confirm a feather appears in the menu bar.
-6. In another terminal, run `quill apps` while playing audio and confirm it
+3. Install `.build/release/scribe` and run `scribe models download-transcription`.
+4. Run `scribe doctor`; resolve any hard failure.
+5. Start `scribe run` and confirm a feather appears in the menu bar.
+6. In another terminal, run `scribe apps` while playing audio and confirm it
    prints PIDs, input/output state, and bundle IDs.
 
 For every completed recording below, expect exactly one folder named
@@ -26,10 +26,10 @@ the remote participant belongs in `system.caf`.
 ## 2. Consent behavior—no automatic recording
 
 1. Start a configured call and wait longer than `call_prompt_delay_seconds`.
-2. Confirm Quill shows **Record** and **Not now** but creates no folder and no
+2. Confirm Scribe shows **Record** and **Not now** but creates no folder and no
    purple recording indicator before you click.
 3. Click **Not now**. Keep the call active for one minute.
-4. Confirm Quill does not prompt again and creates no recording.
+4. Confirm Scribe does not prompt again and creates no recording.
 5. End the call, start a new call, and confirm a new prompt may appear.
 6. Play Spotify without any app using microphone input. Confirm no call prompt
    appears; output-only media must not qualify as a call.
@@ -37,7 +37,7 @@ the remote participant belongs in `system.caf`.
 ## 3. Zoom
 
 1. Join a Zoom call with one remote participant; both people speak.
-2. At Quill's prompt, click **Record**.
+2. At Scribe's prompt, click **Record**.
 3. While the call continues, play music in a separate Music or Spotify app and
    trigger a Messages notification.
 4. End the Zoom call and wait `call_end_delay_seconds`.
@@ -47,7 +47,7 @@ the remote participant belongs in `system.caf`.
 ## 4. Microsoft Teams
 
 1. Join a Teams meeting and have both sides speak for at least 30 seconds.
-2. Click **Record** in Quill's prompt; share/unshare the screen once to provoke
+2. Click **Record** in Scribe's prompt; share/unshare the screen once to provoke
    possible audio-device reconfiguration.
 3. End the meeting and wait for local processing.
 4. Verify the expected files, two-sided transcript, structured note, and no
@@ -63,12 +63,12 @@ the remote participant belongs in `system.caf`.
 
 ## 6. Google Meet in Safari
 
-1. Join Meet in Safari and click **Record** in Quill's prompt.
+1. Join Meet in Safari and click **Record** in Scribe's prompt.
 2. Have both sides speak, then trigger unrelated audio from a separate app.
 3. End the call and verify the expected files and isolation.
 4. Expect `meta.json.source_bundle_id` to be `com.apple.Safari` (if Core Audio
    reports a Safari helper bundle instead, add that reported ID from
-   `quill apps` to `call_apps` and record it here).
+   `scribe apps` to `call_apps` and record it here).
 
 ## 7. Slack huddle—native app
 
@@ -111,15 +111,15 @@ the remote participant belongs in `system.caf`.
 ## 12. Unknown app—manual selection
 
 1. Start audio input/output in an app not present in `call_apps`.
-2. Run `quill apps` and copy its bundle ID.
-3. Run `quill start --bundle-id <copied-id> --title "Unknown app test"`.
-4. Confirm recording starts only after this command; then run `quill stop`.
+2. Run `scribe apps` and copy its bundle ID.
+3. Run `scribe start --bundle-id <copied-id> --title "Unknown app test"`.
+4. Confirm recording starts only after this command; then run `scribe stop`.
 5. Verify the expected folder and that unrelated process output is absent.
 
 ## 13. Calendar association and denial
 
 1. Create a calendar event covering the current time with title
-   `Quill Calendar Test` and two attendees.
+   `Scribe Calendar Test` and two attendees.
 2. Record a short call. Expect the folder and `note.md` heading to contain that
    title, and expect both attendees in `meta.json` and `note.md`.
 3. Deny Calendars access, record another short call, and confirm recording still
@@ -138,10 +138,10 @@ the remote participant belongs in `system.caf`.
 ## 15. Crash recovery
 
 1. Start a recording, speak on both sides for at least 20 seconds, then run
-   `kill -9 <quill-pid>` without stopping.
+   `kill -9 <scribe-pid>` without stopping.
 2. Confirm the meeting folder already contains growing CAF files and
    `meta.json` with `state: "recording"`.
-3. Relaunch Quill. Expect `state: "interrupted"`, `recovered_at`, a usable
+3. Relaunch Scribe. Expect `state: "interrupted"`, `recovered_at`, a usable
    transcript/note after processing, and no deletion of existing audio.
 
 ## 16. Disk reserve
@@ -157,14 +157,14 @@ the remote participant belongs in `system.caf`.
    complete `transcript.md` and a `note.md` explicitly saying no local model is
    configured and no network call was made.
 2. Configure a real local `llama-cli` and GGUF instruct model, then run
-   `quill note <meeting-dir>`.
+   `scribe note <meeting-dir>`.
 3. Expect `note.md` to contain Summary, Decisions, Action items, and Open
    questions, plus the local backend/model name. Compare every claim with the
    transcript; fabricated facts fail this test.
 
 ## 18. CLI parity
 
-1. Exercise `quill start`, `stop`, `open`, `apps`, `transcribe`, `note`,
+1. Exercise `scribe start`, `stop`, `open`, `apps`, `transcribe`, `note`,
    `recover`, `doctor`, and `quit`.
 2. Confirm each command acts only on local processes/files and that menu-bar
    start/stop results match CLI start/stop results.

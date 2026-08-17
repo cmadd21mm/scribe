@@ -73,8 +73,8 @@ final class CalendarService {
         guard !reportedPermissionFailure else { return }
         reportedPermissionFailure = true
         let suffix = detail.map { " (\($0))" } ?? ""
-        let message = "Calendar access is unavailable\(suffix). Enable Quill in System Settings → Privacy & Security → Calendars. Recording will continue with an app-and-time name."
+        let message = "Calendar access is unavailable\(suffix). Enable Scribe in System Settings → Privacy & Security → Calendars. Recording will continue with an app-and-time name."
         FileHandle.standardError.write(Data("warning: \(message)\n".utf8))
-        notifyUser(title: "Quill: calendar unavailable", body: message)
+        notifyUser(title: "Scribe: calendar unavailable", body: message)
     }
 }

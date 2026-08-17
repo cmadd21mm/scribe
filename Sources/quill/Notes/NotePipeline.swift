@@ -67,7 +67,7 @@ enum NoteRenderer {
 
         ---
 
-        _The local [transcript](transcript.md) is available. Quill did not make a network call._
+        _The local [transcript](transcript.md) is available. Scribe did not make a network call._
         """
     }
 

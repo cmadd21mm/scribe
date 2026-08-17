@@ -148,7 +148,7 @@ final class RecordingSession: @unchecked Sendable {
                 trackLastGrew[name] = now
                 if trackStalled.remove(name) != nil {
                     notifyUser(
-                        title: "Quill: \(name) track recovered",
+                        title: "Scribe: \(name) track recovered",
                         body: "\(name.capitalized) audio is being written again."
                     )
                 }
@@ -157,7 +157,7 @@ final class RecordingSession: @unchecked Sendable {
                       now.timeIntervalSince(last) >= Self.stallThreshold {
                 trackStalled.insert(name)
                 notifyUser(
-                    title: "Quill: \(name) track stalled",
+                    title: "Scribe: \(name) track stalled",
                     body: "No \(name) audio has been written for \(Int(now.timeIntervalSince(last))) seconds."
                 )
             }

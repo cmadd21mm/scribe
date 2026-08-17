@@ -14,7 +14,7 @@ enum DiskSpaceChecker {
         var description: String {
             let formatter = ByteCountFormatter()
             formatter.countStyle = .file
-            return "not enough free disk space: \(formatter.string(fromByteCount: availableBytes)) available; Quill requires \(formatter.string(fromByteCount: minimumBytes)) before recording"
+            return "not enough free disk space: \(formatter.string(fromByteCount: availableBytes)) available; Scribe requires \(formatter.string(fromByteCount: minimumBytes)) before recording"
         }
     }
 

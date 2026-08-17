@@ -15,7 +15,7 @@ actor ParakeetEngine: TranscriptionEngine {
             switch self {
             case .notPrepared: return "parakeet engine used before prepare()"
             case .modelMissing(let url):
-                return "local transcription model is missing at \(url.path); run `quill models download-transcription` before recording"
+                return "local transcription model is missing at \(url.path); run `scribe models download-transcription` before recording"
             case .unreadableAudio(let url, let e):
                 return "unreadable or empty audio \(url.lastPathComponent)"
                     + (e.map { ": \($0)" } ?? "")

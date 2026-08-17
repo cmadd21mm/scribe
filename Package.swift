@@ -2,8 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "quill",
+    name: "Scribe",
     platforms: [.macOS(.v15)],
+    products: [
+        .executable(name: "scribe", targets: ["quill"]),
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
         .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.0"),
@@ -18,7 +21,7 @@ let package = Package(
             exclude: ["Info.plist"],
             linkerSettings: [
                 // Embed Info.plist into the binary so TCC can attribute the
-                // system-audio-capture permission to quill itself when it
+                // system-audio-capture permission to Scribe itself when it
                 // runs as a LaunchAgent (no .app bundle to carry a plist).
                 .unsafeFlags([
                     "-Xlinker", "-sectcreate",

@@ -1,7 +1,7 @@
 import CoreAudio
 import Foundation
 
-/// The Core Audio properties Quill needs, separated from discovery so process
+/// The Core Audio properties Scribe needs, separated from discovery so process
 /// selection stays deterministic and unit-testable without audio hardware.
 struct AudioProcessSnapshot: Equatable, Sendable {
     let objectID: AudioObjectID
@@ -13,7 +13,7 @@ struct AudioProcessSnapshot: Equatable, Sendable {
 
 enum AudioProcessSelector {
     /// Return only active output processes whose bundle IDs are explicitly
-    /// allowed. Quill never falls back to a global tap.
+    /// allowed. Scribe never falls back to a global tap.
     static func captureTargets(
         from processes: [AudioProcessSnapshot],
         allowedBundleIDs: Set<String>

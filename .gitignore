@@ -2,3 +2,6 @@
 .build-cache/
 .DS_Store
 *.xcuserstate
+dist/
+scribe-demo*.png
+scribe-design*.png

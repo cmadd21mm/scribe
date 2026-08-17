@@ -3,9 +3,9 @@ import ArgumentParser
 import Foundation
 
 enum QuillControlNotification {
-    static let start = Notification.Name("com.digimata.quill.control.start")
-    static let stop = Notification.Name("com.digimata.quill.control.stop")
-    static let quit = Notification.Name("com.digimata.quill.control.quit")
+    static let start = Notification.Name("com.cmadd21mm.scribe.control.start")
+    static let stop = Notification.Name("com.cmadd21mm.scribe.control.stop")
+    static let quit = Notification.Name("com.cmadd21mm.scribe.control.quit")
 }
 
 private enum ControlClient {
@@ -21,7 +21,7 @@ private enum ControlClient {
 struct StartRecording: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "start",
-        abstract: "Ask the running Quill daemon to start a recording."
+        abstract: "Ask the running Scribe app to start a recording."
     )
 
     @Option(name: .long, help: "Bundle ID to capture; repeat for multiple processes.")
@@ -34,31 +34,31 @@ struct StartRecording: ParsableCommand {
         var info: [String: Any] = ["title": title]
         if !bundleID.isEmpty { info["bundle_ids"] = bundleID }
         ControlClient.post(QuillControlNotification.start, userInfo: info)
-        print("recording request sent to the Quill daemon")
+        print("recording request sent to Scribe")
     }
 }
 
 struct StopRecording: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "stop",
-        abstract: "Ask the running Quill daemon to stop its recording."
+        abstract: "Ask the running Scribe app to stop its recording."
     )
 
     func run() {
         ControlClient.post(QuillControlNotification.stop)
-        print("stop request sent to the Quill daemon")
+        print("stop request sent to Scribe")
     }
 }
 
 struct QuitDaemon: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "quit",
-        abstract: "Ask the running Quill daemon to stop cleanly and quit."
+        abstract: "Ask the running Scribe app to stop cleanly and quit."
     )
 
     func run() {
         ControlClient.post(QuillControlNotification.quit)
-        print("quit request sent to the Quill daemon")
+        print("quit request sent to Scribe")
     }
 }
 

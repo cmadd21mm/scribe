@@ -36,7 +36,7 @@ final class SystemAudioRecorder {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private let queue = DispatchQueue(label: "com.digimata.quill.system-tap")
+    private let queue = DispatchQueue(label: "com.cmadd21mm.scribe.system-tap")
     private(set) var isRecording = false
 
     private struct LockedState {
@@ -70,7 +70,7 @@ final class SystemAudioRecorder {
         guard !processObjectIDs.isEmpty else { throw RecorderError.noEligibleProcesses }
 
         let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
-        description.name = "quill system tap"
+        description.name = "Scribe system tap"
         description.isPrivate = true
         description.muteBehavior = .unmuted
 
@@ -121,7 +121,7 @@ final class SystemAudioRecorder {
 
     private func createAggregateDevice(tapUUID: UUID) throws {
         let desc: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "quill-tap",
+            kAudioAggregateDeviceNameKey: "scribe-tap",
             kAudioAggregateDeviceUIDKey: UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,

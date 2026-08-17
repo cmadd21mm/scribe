@@ -3,14 +3,30 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>com.digimata.quill</string>
+    <string>com.cmadd21mm.scribe</string>
     <key>CFBundleName</key>
-    <string>quill</string>
+    <string>Scribe</string>
+    <key>CFBundleDisplayName</key>
+    <string>Scribe</string>
+    <key>CFBundleExecutable</key>
+    <string>Scribe</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleIconFile</key>
+    <string>Scribe.icns</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>quill records your microphone during meetings so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Scribe records your microphone only when you choose to capture a conversation. Audio stays on this Mac.</string>
     <key>NSAudioCaptureUsageDescription</key>
-    <string>quill records system audio (the other side of your meetings) so you can transcribe them later. Audio never leaves this Mac.</string>
+    <string>Scribe records the other side of a call only after you choose Record. Audio stays on this Mac.</string>
     <key>NSCalendarsFullAccessUsageDescription</key>
-    <string>Quill uses a concurrent calendar event to name your local meeting folder and note. Calendar data never leaves this Mac.</string>
+    <string>Scribe can use the current calendar event to name a local note. Calendar data stays on this Mac.</string>
 </dict>
 </plist>

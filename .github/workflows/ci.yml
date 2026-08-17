@@ -15,3 +15,11 @@ jobs:
         run: swift test
       - name: Release build
         run: swift build -c release
+      - name: Build installable app
+        run: sh scripts/build-app.sh
+      - name: Verify signature
+        run: codesign --verify --deep --strict dist/Scribe.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Scribe-macOS
+          path: dist/Scribe.app

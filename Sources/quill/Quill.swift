@@ -1,12 +1,13 @@
 import AppKit
 import ArgumentParser
 import Foundation
+import SwiftUI
 
 @main
-struct Quill: AsyncParsableCommand {
+struct ScribeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "quill",
-        abstract: "Local meeting recorder + transcriber. Records mic and system audio as two tracks, then transcribes on-device.",
+        commandName: "scribe",
+        abstract: "Private, local-first meeting notes for macOS.",
         subcommands: [
             Run.self,
             StartRecording.self,
@@ -20,9 +21,53 @@ struct Quill: AsyncParsableCommand {
             Models.self,
             Doctor.self,
             Install.self,
+            DemoSnapshot.self,
         ],
         defaultSubcommand: Run.self
     )
+}
+
+struct DemoSnapshot: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "snapshot",
+        abstract: "Render the built-in demo library to a PNG for visual regression review."
+    )
+
+    @Option(name: .long, help: "PNG output path.")
+    var output: String = "scribe-demo.png"
+
+    func run() async throws {
+        try await render()
+    }
+
+    @MainActor
+    private func render() throws {
+        let model = ScribeAppModel(root: URL(fileURLWithPath: "/tmp/scribe-demo"), demo: true)
+        let content = ScribeAppView(model: model)
+            .frame(width: 1_440, height: 1_024)
+            .environment(\.colorScheme, .light)
+        let hosting = NSHostingView(rootView: content)
+        hosting.frame = NSRect(x: 0, y: 0, width: 1_440, height: 1_024)
+        let window = NSWindow(
+            contentRect: hosting.bounds,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        hosting.displayIfNeeded()
+        guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else {
+            throw ValidationError("could not render the demo window")
+        }
+        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw ValidationError("could not encode the demo window")
+        }
+        let url = URL(fileURLWithPath: Config.expandPath(output))
+        try png.write(to: url, options: .atomic)
+        print(url.path)
+    }
 }
 
 struct Run: AsyncParsableCommand {
@@ -33,6 +78,9 @@ struct Run: AsyncParsableCommand {
 
     @Option(name: .long, help: "Recordings root directory (overrides the config file).")
     var out: String?
+
+    @Flag(name: .long, help: "Open the app with built-in sample meetings for screenshots and design review.")
+    var demo = false
 
     func run() async throws {
         // The async root may dispatch synchronous subcommands on a cooperative
@@ -45,19 +93,18 @@ struct Run: AsyncParsableCommand {
     private func runMain() throws {
         let root = Config.resolveRoot(cliOverride: out)
 
-        // Non-blocking: permissions prompt on first recording, so warnings at
-        // startup are informational, not fatal.
+        // Permissions are intentionally non-blocking. Scribe should always
+        // open, explain what is missing, and ask only when the user records.
         let checks = DoctorReport.run(recordingsRoot: root)
         if !DoctorReport.allOK(checks) {
-            FileHandle.standardError.write(Data("startup checks failed:\n".utf8))
+            FileHandle.standardError.write(Data("startup checks need attention:\n".utf8))
             DoctorReport.print(checks)
-            throw ExitCode(1)
         }
 
         let app = NSApplication.shared
-        app.setActivationPolicy(.accessory)
+        app.setActivationPolicy(.regular)
 
-        let controller = AppController(root: root)
+        let controller = AppController(root: root, demo: demo)
 
         let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         sigint.setEventHandler {
@@ -68,7 +115,7 @@ struct Run: AsyncParsableCommand {
         signal(SIGINT, SIG_IGN)
 
         FileHandle.standardError.write(Data(
-            "quill up · recordings → \(root.path) · ^C to quit\n".utf8
+            "Scribe is open · recordings → \(root.path) · ^C to quit\n".utf8
         ))
         app.run()
     }
@@ -92,8 +139,12 @@ struct Doctor: ParsableCommand {
 /// ticker. All state transitions happen on the main actor.
 @MainActor
 final class AppController {
-    private let root: URL
-    private let menuBar = MenuBarController()
+    private var root: URL
+    private let demo: Bool
+    private let menuBar: MenuBarController
+    private let model: ScribeAppModel
+    private let windowController: ScribeWindowController
+    private let mainMenu: ScribeMainMenu
     private let transcription = TranscriptionCoordinator()
     private let calendar = CalendarService()
     private var session: RecordingSession?
@@ -106,12 +157,33 @@ final class AppController {
         endAfter: Config.callEndDelay()
     )
 
-    init(root: URL) {
+    init(root: URL, demo: Bool = false) {
         self.root = root
+        self.demo = demo
+        menuBar = MenuBarController()
+        model = ScribeAppModel(root: root, demo: demo)
+        windowController = ScribeWindowController(model: model, demo: demo)
+        mainMenu = ScribeMainMenu()
+
         menuBar.onToggle = { [weak self] in self?.toggle() }
+        menuBar.onOpenApp = { [weak self] in self?.windowController.present() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
+        menuBar.onSettings = { [weak self] in self?.openSettings() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
+
+        mainMenu.onToggleRecording = { [weak self] in self?.toggle() }
+        mainMenu.onOpenFolder = { [weak self] in self?.openFolder() }
+        mainMenu.onOpenSettings = { [weak self] in self?.openSettings() }
+        mainMenu.onQuit = { [weak self] in self?.shutdown() }
+        mainMenu.install()
+
+        model.onToggleRecording = { [weak self] in self?.toggle() }
+        model.onChooseRecordingsFolder = { [weak self] in self?.chooseRecordingsFolder() }
+        model.onDownloadTranscriptionModel = { [weak self] in self?.downloadTranscriptionModel() }
+        windowController.present()
+
+        guard !demo else { return }
 
         do {
             let recovered = try SessionRecovery.recoverInterrupted(root: root)
@@ -123,7 +195,7 @@ final class AppController {
         } catch {
             FileHandle.standardError.write(Data("recording recovery failed: \(error)\n".utf8))
             notifyUser(
-                title: "Quill: recovery failed",
+                title: "Scribe: recovery failed",
                 body: "An interrupted recording could not be recovered: \(error)"
             )
         }
@@ -232,17 +304,21 @@ final class AppController {
             } else {
                 message = "\(error)"
             }
-            notifyUser(title: "Quill: recording failed", body: message)
+            notifyUser(title: "Scribe: recording failed", body: message)
             return
         }
 
         menuBar.update(recording: true, elapsed: "0:00")
+        model.isRecording = true
+        model.recordingElapsed = "0:00"
+        model.refresh()
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
 
     private func pollForCalls() {
+        guard Config.promptForCalls() else { return }
         let snapshots: [AudioProcessSnapshot]
         do {
             snapshots = try AudioProcessDiscovery.snapshots()
@@ -275,7 +351,7 @@ final class AppController {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = "Record this \(appName) call?"
-        alert.informativeText = "Quill never records automatically. Audio stays on this Mac."
+        alert.informativeText = "Scribe never records automatically. Audio stays on this Mac."
         alert.addButton(withTitle: "Record")
         alert.addButton(withTitle: "Not now")
         NSApp.activate(ignoringOtherApps: true)
@@ -308,6 +384,9 @@ final class AppController {
         ticker?.invalidate()
         ticker = nil
         menuBar.update(recording: false, elapsed: nil)
+        model.isRecording = false
+        model.recordingElapsed = "0:00"
+        model.refresh()
 
         let dir = session.dir
         Task { [transcription] in await transcription.enqueue(dir) }
@@ -317,26 +396,93 @@ final class AppController {
         switch status {
         case .idle:
             menuBar.updateTranscription(nil)
-        case .transcribing(let name, let queued):
-            menuBar.updateTranscription(
-                queued > 0 ? "transcribing \(name) · \(queued) queued" : "transcribing \(name)"
-            )
+            model.transcriptionStatus = nil
+            model.refresh()
+        case .transcribing(_, let queued):
+            let text = queued > 0 ? "Transcribing · \(queued) queued" : "Transcribing locally"
+            menuBar.updateTranscription(text.lowercased())
+            model.transcriptionStatus = text
         case .failed(let name):
             menuBar.updateTranscription("transcription failed · \(name)")
+            model.transcriptionStatus = "Transcription needs attention"
+            model.refresh()
         }
     }
 
     private func tick() {
         guard let session else { return }
-        menuBar.update(
-            recording: true,
-            elapsed: Self.format(Date().timeIntervalSince(session.startedAt))
-        )
+        let elapsed = Self.format(Date().timeIntervalSince(session.startedAt))
+        menuBar.update(recording: true, elapsed: elapsed)
+        model.recordingElapsed = elapsed
     }
 
     private func openFolder() {
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         NSWorkspace.shared.open(root)
+    }
+
+    private func openSettings() {
+        windowController.present()
+        model.showSettings = true
+    }
+
+    private func chooseRecordingsFolder() {
+        guard session == nil else {
+            model.alertMessage = "Stop the current recording before changing its folder."
+            return
+        }
+        let panel = NSOpenPanel()
+        panel.title = "Choose where Scribe keeps recordings"
+        panel.prompt = "Choose Folder"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = root
+        guard panel.runModal() == .OK, let selected = panel.url else { return }
+        do {
+            try FileManager.default.createDirectory(at: selected, withIntermediateDirectories: true)
+            try Config.update { $0.recordingsDir = selected.path }
+            root = selected
+            model.changeRoot(selected)
+        } catch {
+            model.alertMessage = "Scribe couldn’t use that folder: \(error.localizedDescription)"
+        }
+    }
+
+    private func downloadTranscriptionModel() {
+        model.transcriptionStatus = "Downloading local model…"
+        let executable = URL(fileURLWithPath: CommandLine.arguments.first ?? "scribe")
+        Task.detached { [weak self] in
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = ["models", "download-transcription"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = pipe
+            do {
+                try process.run()
+                process.waitUntilExit()
+                let output = String(
+                    data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                    encoding: .utf8
+                ) ?? ""
+                await MainActor.run {
+                    guard let self else { return }
+                    if process.terminationStatus == 0 {
+                        self.model.transcriptionStatus = "Local model ready"
+                    } else {
+                        self.model.transcriptionStatus = nil
+                        self.model.alertMessage = "Model download failed. \(output)"
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    self?.model.transcriptionStatus = nil
+                    self?.model.alertMessage = "Model download failed: \(error.localizedDescription)"
+                }
+            }
+        }
     }
 
     private static func format(_ interval: TimeInterval) -> String {

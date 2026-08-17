@@ -27,6 +27,7 @@ struct QuillConfiguration: Codable, Equatable, Sendable {
     var callPromptDelaySeconds: Double? = nil
     var callEndDelaySeconds: Double? = nil
     var minimumFreeDiskGB: Double? = nil
+    var promptForCalls: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case recordingsDir = "recordings_dir"
@@ -36,6 +37,7 @@ struct QuillConfiguration: Codable, Equatable, Sendable {
         case callPromptDelaySeconds = "call_prompt_delay_seconds"
         case callEndDelaySeconds = "call_end_delay_seconds"
         case minimumFreeDiskGB = "minimum_free_disk_gb"
+        case promptForCalls = "prompt_for_calls"
     }
 }
 
@@ -61,6 +63,9 @@ enum Config {
     ]
 
     static let path = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent(".config/scribe/config.json")
+
+    static let legacyPath = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent(".config/quill/config.json")
 
     static let defaultRoot = FileManager.default.homeDirectoryForCurrentUser
@@ -98,6 +103,10 @@ enum Config {
 
     static func callEndDelay() -> TimeInterval {
         max(0, load()?.callEndDelaySeconds ?? 10)
+    }
+
+    static func promptForCalls() -> Bool {
+        load()?.promptForCalls ?? true
     }
 
     static func minimumFreeDiskBytes() -> Int64 {
@@ -138,13 +147,44 @@ enum Config {
         return recordingsDir() ?? defaultRoot
     }
 
+    static func expandPath(_ value: String) -> String {
+        expand(value)
+    }
+
+    static func current() -> QuillConfiguration {
+        load() ?? QuillConfiguration()
+    }
+
+    static func update(_ change: (inout QuillConfiguration) -> Void) throws {
+        var configuration = current()
+        change(&configuration)
+        try save(configuration)
+    }
+
+    static func save(_ configuration: QuillConfiguration) throws {
+        try FileManager.default.createDirectory(
+            at: path.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(configuration).write(to: path, options: .atomic)
+    }
+
     private static func load() -> QuillConfiguration? {
-        guard FileManager.default.fileExists(atPath: path.path) else { return nil }
+        let source: URL
+        if FileManager.default.fileExists(atPath: path.path) {
+            source = path
+        } else if FileManager.default.fileExists(atPath: legacyPath.path) {
+            source = legacyPath
+        } else {
+            return nil
+        }
         do {
-            return try parse(Data(contentsOf: path))
+            return try parse(Data(contentsOf: source))
         } catch {
             FileHandle.standardError.write(Data(
-                "warning: \(path.path) is invalid (\(error)) — using defaults\n".utf8
+                "warning: \(source.path) is invalid (\(error)) — using defaults\n".utf8
             ))
             return nil
         }
