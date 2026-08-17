@@ -453,7 +453,27 @@ final class AppController {
     private func downloadTranscriptionModel() {
         model.transcriptionStatus = "Downloading local model…"
         let executable = URL(fileURLWithPath: CommandLine.arguments.first ?? "scribe")
-        Task.detached { [weak self] in
+        Task { [weak self] in
+            let result = await Self.runModelDownload(executable: executable)
+            guard let self else { return }
+            if result.status == 0 {
+                model.transcriptionStatus = "Local model ready"
+            } else {
+                model.transcriptionStatus = nil
+                model.alertMessage = "Model download failed. \(result.output)"
+            }
+        }
+    }
+
+    private struct ModelDownloadResult: Sendable {
+        let status: Int32
+        let output: String
+    }
+
+    nonisolated private static func runModelDownload(
+        executable: URL
+    ) async -> ModelDownloadResult {
+        await Task.detached {
             let process = Process()
             process.executableURL = executable
             process.arguments = ["models", "download-transcription"]
@@ -467,22 +487,11 @@ final class AppController {
                     data: pipe.fileHandleForReading.readDataToEndOfFile(),
                     encoding: .utf8
                 ) ?? ""
-                await MainActor.run {
-                    guard let self else { return }
-                    if process.terminationStatus == 0 {
-                        self.model.transcriptionStatus = "Local model ready"
-                    } else {
-                        self.model.transcriptionStatus = nil
-                        self.model.alertMessage = "Model download failed. \(output)"
-                    }
-                }
+                return ModelDownloadResult(status: process.terminationStatus, output: output)
             } catch {
-                await MainActor.run {
-                    self?.model.transcriptionStatus = nil
-                    self?.model.alertMessage = "Model download failed: \(error.localizedDescription)"
-                }
+                return ModelDownloadResult(status: -1, output: error.localizedDescription)
             }
-        }
+        }.value
     }
 
     private static func format(_ interval: TimeInterval) -> String {

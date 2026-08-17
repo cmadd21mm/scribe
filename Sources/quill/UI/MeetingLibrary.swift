@@ -65,14 +65,13 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     }
 
     var searchableText: String {
-        ([title, summary, userNotes]
-            + attendees
-            + decisions
-            + actionItems.map(\.text)
-            + openQuestions
-            + transcript.map { "\($0.speaker) \($0.text)" })
-            .joined(separator: " ")
-            .lowercased()
+        var fields = [title, summary, userNotes]
+        fields.append(contentsOf: attendees)
+        fields.append(contentsOf: decisions)
+        fields.append(contentsOf: actionItems.map(\.text))
+        fields.append(contentsOf: openQuestions)
+        fields.append(contentsOf: transcript.map { "\($0.speaker) \($0.text)" })
+        return fields.joined(separator: " ").lowercased()
     }
 
     static func demoMeetings(now: Date = Date()) -> [MeetingRecord] {
