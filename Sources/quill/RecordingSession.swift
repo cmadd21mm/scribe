@@ -33,6 +33,7 @@ final class RecordingSession: @unchecked Sendable {
         try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
         dir = candidate
         try writeInitialNote()
+        try writeMetadata(state: "recording", endedAt: nil)
     }
 
     /// Start both tracks. If the mic fails after the system tap started, the
@@ -69,7 +70,6 @@ final class RecordingSession: @unchecked Sendable {
         system.stop()
 
         let ended = Date()
-        let iso = ISO8601DateFormatter()
 
         // The tracks don't start on the same buffer; record how far each
         // lags the earliest so transcript timestamps share one clock.
@@ -77,27 +77,40 @@ final class RecordingSession: @unchecked Sendable {
         let systemStart = system.firstBufferAt ?? startedAt
         let earliest = min(micStart, systemStart)
 
+        try? writeMetadata(
+            state: "complete",
+            endedAt: ended,
+            startOffsets: [
+                "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
+                "system": Int(systemStart.timeIntervalSince(earliest) * 1000),
+            ]
+        )
+    }
+
+    private func writeMetadata(
+        state: String,
+        endedAt: Date?,
+        startOffsets: [String: Int] = ["mic": 0, "system": 0]
+    ) throws {
+        let iso = ISO8601DateFormatter()
         let meta: [String: Any] = [
             "schema_version": 1,
+            "state": state,
             "started": iso.string(from: startedAt),
-            "ended": iso.string(from: ended),
-            "duration_seconds": Int(ended.timeIntervalSince(startedAt)),
+            "ended": endedAt.map(iso.string(from:)) ?? NSNull(),
+            "duration_seconds": endedAt.map { Int($0.timeIntervalSince(startedAt)) } ?? 0,
             "title": context.title,
             "attendees": context.attendees,
             "calendar_event_id": context.calendarEventID ?? NSNull(),
             "source_bundle_id": context.sourceBundleID ?? NSNull(),
             "files": ["mic": "mic.caf", "system": "system.caf"],
-            "start_offset_ms": [
-                "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
-                "system": Int(systemStart.timeIntervalSince(earliest) * 1000),
-            ],
+            "start_offset_ms": startOffsets,
         ]
-        if let data = try? JSONSerialization.data(
+        let data = try JSONSerialization.data(
             withJSONObject: meta,
             options: [.prettyPrinted, .sortedKeys]
-        ) {
-            try? data.write(to: dir.appendingPathComponent("meta.json"))
-        }
+        )
+        try data.write(to: dir.appendingPathComponent("meta.json"), options: .atomic)
     }
 
     private func writeInitialNote() throws {

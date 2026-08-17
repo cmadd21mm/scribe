@@ -89,6 +89,11 @@ enum Config {
         load()?["call_end_delay_seconds"] as? TimeInterval ?? 10
     }
 
+    static func minimumFreeDiskBytes() -> Int64 {
+        let gigabytes = load()?["minimum_free_disk_gb"] as? Double ?? 2
+        return Int64(max(0, gigabytes) * 1_000_000_000)
+    }
+
     /// Parse the config file. A malformed config is reported on stderr rather
     /// than silently ignored — recordings landing in an unexpected place is
     /// worse than a warning.

@@ -98,6 +98,21 @@ final class AppController {
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
 
+        do {
+            let recovered = try SessionRecovery.recoverInterrupted(root: root)
+            if !recovered.isEmpty {
+                FileHandle.standardError.write(Data(
+                    "recovered \(recovered.count) interrupted recording(s)\n".utf8
+                ))
+            }
+        } catch {
+            FileHandle.standardError.write(Data("recording recovery failed: \(error)\n".utf8))
+            notifyUser(
+                title: "Quill: recovery failed",
+                body: "An interrupted recording could not be recovered: \(error)"
+            )
+        }
+
         detectionTicker = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) {
             [weak self] _ in
             MainActor.assumeIsolated { self?.pollForCalls() }
@@ -142,13 +157,26 @@ final class AppController {
             sourceBundleID: sourceBundleID
         )
         do {
+            guard await Permissions.requestMicrophone() else {
+                throw RecordingStartError.permission(Permissions.microphoneSettingsMessage)
+            }
+            try DiskSpaceChecker.requireSpace(
+                at: root,
+                minimumBytes: Config.minimumFreeDiskBytes()
+            )
             let newSession = try RecordingSession(root: root, context: context)
             try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())
             session = newSession
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            notifyUser(title: "quill — recording failed", body: "\(error)")
+            let message: String
+            if case SystemAudioRecorder.RecorderError.tapCreationFailed = error {
+                message = Permissions.systemAudioSettingsMessage
+            } else {
+                message = "\(error)"
+            }
+            notifyUser(title: "Quill: recording failed", body: message)
             return
         }
 
@@ -261,5 +289,15 @@ final class AppController {
         return h > 0
             ? String(format: "%d:%02d:%02d", h, m, s)
             : String(format: "%d:%02d", m, s)
+    }
+}
+
+private enum RecordingStartError: Error, CustomStringConvertible {
+    case permission(String)
+
+    var description: String {
+        switch self {
+        case .permission(let message): return message
+        }
     }
 }
