@@ -7,6 +7,7 @@ import Foundation
 final class RecordingSession: @unchecked Sendable {
     let dir: URL
     let startedAt = Date()
+    let context: MeetingContext
 
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
@@ -18,17 +19,11 @@ final class RecordingSession: @unchecked Sendable {
     private static let watchdogInterval: TimeInterval = 15
     private static let stallThreshold: TimeInterval = 45
 
-    private static let folderFormat: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy.MM.dd-HHmm"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        return f
-    }()
-
     /// Create the session folder under `root` (yyyy.MM.dd-HHmm, suffixed on
     /// collision) without starting capture yet.
-    init(root: URL) throws {
-        let base = Self.folderFormat.string(from: startedAt)
+    init(root: URL, context: MeetingContext) throws {
+        self.context = context
+        let base = MeetingFolderNamer.name(startedAt: startedAt, title: context.title)
         var candidate = root.appendingPathComponent(base, isDirectory: true)
         var n = 2
         while FileManager.default.fileExists(atPath: candidate.path) {
@@ -37,6 +32,7 @@ final class RecordingSession: @unchecked Sendable {
         }
         try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
         dir = candidate
+        try writeInitialNote()
     }
 
     /// Start both tracks. If the mic fails after the system tap started, the
@@ -82,9 +78,14 @@ final class RecordingSession: @unchecked Sendable {
         let earliest = min(micStart, systemStart)
 
         let meta: [String: Any] = [
+            "schema_version": 1,
             "started": iso.string(from: startedAt),
             "ended": iso.string(from: ended),
             "duration_seconds": Int(ended.timeIntervalSince(startedAt)),
+            "title": context.title,
+            "attendees": context.attendees,
+            "calendar_event_id": context.calendarEventID ?? NSNull(),
+            "source_bundle_id": context.sourceBundleID ?? NSNull(),
             "files": ["mic": "mic.caf", "system": "system.caf"],
             "start_offset_ms": [
                 "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
@@ -97,6 +98,29 @@ final class RecordingSession: @unchecked Sendable {
         ) {
             try? data.write(to: dir.appendingPathComponent("meta.json"))
         }
+    }
+
+    private func writeInitialNote() throws {
+        let attendees = context.attendees.isEmpty
+            ? "_No calendar attendees available_"
+            : context.attendees.map { "- \($0)" }.joined(separator: "\n")
+        let note = """
+        # \(context.title)
+
+        **Started:** \(ISO8601DateFormatter().string(from: startedAt))
+
+        ## Attendees
+
+        \(attendees)
+
+        ---
+
+        _Recording in progress. Structured notes will be written locally after transcription._
+        """
+        try Data(note.utf8).write(
+            to: dir.appendingPathComponent("note.md"),
+            options: .atomic
+        )
     }
 
     private func checkTrackLiveness() {

@@ -81,9 +81,11 @@ final class AppController {
     private let root: URL
     private let menuBar = MenuBarController()
     private let transcription = TranscriptionCoordinator()
+    private let calendar = CalendarService()
     private var session: RecordingSession?
     private var ticker: Timer?
     private var detectionTicker: Timer?
+    private var isStarting = false
     private var detector = CallDetectionStateMachine(
         promptAfter: Config.callPromptDelay(),
         endAfter: Config.callEndDelay()
@@ -120,15 +122,27 @@ final class AppController {
 
     private func toggle() {
         if session == nil {
-            startSession()
+            Task { await startSession() }
         } else {
             stopSession()
         }
     }
 
-    private func startSession(allowedBundleIDs: Set<String>? = nil) {
+    private func startSession(
+        allowedBundleIDs: Set<String>? = nil,
+        fallbackTitle: String = "Manual meeting",
+        sourceBundleID: String? = nil
+    ) async {
+        guard !isStarting, session == nil else { return }
+        isStarting = true
+        defer { isStarting = false }
+        let context = await calendar.context(
+            at: Date(),
+            fallbackTitle: fallbackTitle,
+            sourceBundleID: sourceBundleID
+        )
         do {
-            let newSession = try RecordingSession(root: root)
+            let newSession = try RecordingSession(root: root, context: context)
             try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())
             session = newSession
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
@@ -183,8 +197,17 @@ final class AppController {
         NSApp.activate(ignoringOtherApps: true)
 
         if alert.runModal() == .alertFirstButtonReturn {
-            startSession(allowedBundleIDs: [call.bundleID])
-            if session != nil { detector.markRecording(bundleID: call.bundleID) }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.startSession(
+                    allowedBundleIDs: [call.bundleID],
+                    fallbackTitle: "\(appName) call",
+                    sourceBundleID: call.bundleID
+                )
+                if self.session != nil {
+                    self.detector.markRecording(bundleID: call.bundleID)
+                }
+            }
         } else {
             detector.decline(bundleID: call.bundleID)
         }
