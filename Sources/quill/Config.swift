@@ -14,6 +14,10 @@ import Foundation
 /// directory as its argument — after the transcript is written, or right
 /// after recording when transcription is disabled.
 enum Config {
+    enum LocalSummarizerConfiguration {
+        case available(any MeetingSummarizer)
+        case unavailable(String)
+    }
     /// Native call apps plus the major browsers used by Meet and Slack
     /// huddles. Users can replace this list with `call_apps` in config.
     static let defaultCallAppBundleIDs: Set<String> = [
@@ -92,6 +96,32 @@ enum Config {
     static func minimumFreeDiskBytes() -> Int64 {
         let gigabytes = load()?["minimum_free_disk_gb"] as? Double ?? 2
         return Int64(max(0, gigabytes) * 1_000_000_000)
+    }
+
+    static func localSummarizer() -> LocalSummarizerConfiguration {
+        guard let summary = load()?["summarization"] as? [String: Any] else {
+            return .unavailable("no local summarization model is configured")
+        }
+        guard summary["backend"] as? String == "llama.cpp" else {
+            return .unavailable("summarization.backend must be llama.cpp")
+        }
+        guard let executablePath = summary["executable"] as? String,
+              let modelPath = summary["model_path"] as? String else {
+            return .unavailable("llama.cpp executable and model_path must be configured")
+        }
+        let executable = URL(fileURLWithPath: (executablePath as NSString).expandingTildeInPath)
+        let model = URL(fileURLWithPath: (modelPath as NSString).expandingTildeInPath)
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            return .unavailable("llama.cpp executable was not found at \(executable.path)")
+        }
+        guard FileManager.default.fileExists(atPath: model.path) else {
+            return .unavailable("local GGUF model was not found at \(model.path)")
+        }
+        return .available(LlamaCppSummarizer(
+            executable: executable,
+            model: model,
+            predictionTokens: summary["prediction_tokens"] as? Int ?? 1_200
+        ))
     }
 
     /// Parse the config file. A malformed config is reported on stderr rather

@@ -92,8 +92,8 @@ enum DoctorReport {
         }
         return Check(
             name: "transcription",
-            status: .warn("parakeet models not downloaded (~600 MB)"),
-            remediation: "downloads automatically on first transcription — record a short test session while online"
+            status: .warn("parakeet models not installed locally (~600 MB)"),
+            remediation: "run `quill models download-transcription` while online before recording"
         )
     }
 

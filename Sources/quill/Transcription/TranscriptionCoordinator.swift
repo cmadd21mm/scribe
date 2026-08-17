@@ -136,7 +136,13 @@ actor TranscriptionCoordinator {
             created_at: ISO8601DateFormatter().string(from: Date()),
             segments: merged
         )
-        try transcript.write(to: dir)
+        try transcript.writeMarkdown(to: dir)
+        let markdown = try String(
+            contentsOf: dir.appendingPathComponent("transcript.md"),
+            encoding: .utf8
+        )
+        try await NotePipeline.generate(sessionDir: dir, transcriptMarkdown: markdown)
+        try transcript.writeCompletionMarker(to: dir)
         log(dir, "done — \(merged.count) segments")
     }
 
@@ -248,12 +254,22 @@ struct Transcript: Codable {
     /// completion marker. Both writes are atomic, so interrupted sessions are
     /// safely retried instead of being mistaken for complete transcripts.
     func write(to dir: URL) throws {
+        try writeMarkdown(to: dir)
+        try writeCompletionMarker(to: dir)
+    }
+
+    func writeMarkdown(to dir: URL) throws {
+        let markdown = Data(rendered(title: dir.lastPathComponent).utf8)
+        try markdown.write(
+            to: dir.appendingPathComponent("transcript.md"),
+            options: .atomic
+        )
+    }
+
+    func writeCompletionMarker(to dir: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let json = try encoder.encode(self)
-        let markdown = Data(rendered(title: dir.lastPathComponent).utf8)
-        try markdown
-            .write(to: dir.appendingPathComponent("transcript.md"), options: .atomic)
         try json
             .write(to: dir.appendingPathComponent("transcript.json"), options: .atomic)
     }
