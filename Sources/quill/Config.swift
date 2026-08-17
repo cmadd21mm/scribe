@@ -81,6 +81,14 @@ enum Config {
         return Set(configured.filter { !$0.isEmpty })
     }
 
+    static func callPromptDelay() -> TimeInterval {
+        load()?["call_prompt_delay_seconds"] as? TimeInterval ?? 8
+    }
+
+    static func callEndDelay() -> TimeInterval {
+        load()?["call_end_delay_seconds"] as? TimeInterval ?? 10
+    }
+
     /// Parse the config file. A malformed config is reported on stderr rather
     /// than silently ignored — recordings landing in an unexpected place is
     /// worse than a warning.

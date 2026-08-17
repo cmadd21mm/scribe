@@ -83,6 +83,11 @@ final class AppController {
     private let transcription = TranscriptionCoordinator()
     private var session: RecordingSession?
     private var ticker: Timer?
+    private var detectionTicker: Timer?
+    private var detector = CallDetectionStateMachine(
+        promptAfter: Config.callPromptDelay(),
+        endAfter: Config.callEndDelay()
+    )
 
     init(root: URL) {
         self.root = root
@@ -90,6 +95,11 @@ final class AppController {
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
+
+        detectionTicker = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.pollForCalls() }
+        }
 
         Task { [transcription, root] in
             await transcription.setStatusHandler { status in
@@ -103,6 +113,7 @@ final class AppController {
 
     /// Stop any live session cleanly (finalizing files) and exit.
     func shutdown() {
+        detectionTicker?.invalidate()
         stopSession()
         NSApp.terminate(nil)
     }
@@ -115,10 +126,10 @@ final class AppController {
         }
     }
 
-    private func startSession() {
+    private func startSession(allowedBundleIDs: Set<String>? = nil) {
         do {
             let newSession = try RecordingSession(root: root)
-            try newSession.start()
+            try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())
             session = newSession
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
@@ -130,6 +141,52 @@ final class AppController {
         menuBar.update(recording: true, elapsed: "0:00")
         ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
+        }
+    }
+
+    private func pollForCalls() {
+        let snapshots: [AudioProcessSnapshot]
+        do {
+            snapshots = try AudioProcessDiscovery.snapshots()
+        } catch {
+            FileHandle.standardError.write(Data("call detection failed: \(error)\n".utf8))
+            return
+        }
+        let configured = LiveCallFinder.configuredCalls(
+            in: snapshots,
+            allowedBundleIDs: Config.callAppBundleIDs()
+        )
+        for action in detector.update(processes: configured, now: Date()) {
+            switch action {
+            case .prompt(let call):
+                guard session == nil else {
+                    detector.decline(bundleID: call.bundleID)
+                    continue
+                }
+                promptToRecord(call)
+            case .callEnded:
+                if session != nil { stopSession() }
+            }
+        }
+    }
+
+    private func promptToRecord(_ call: LiveCall) {
+        let appName = NSRunningApplication.runningApplications(
+            withBundleIdentifier: call.bundleID
+        ).first?.localizedName ?? call.bundleID
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Record this \(appName) call?"
+        alert.informativeText = "Quill never records automatically. Audio stays on this Mac."
+        alert.addButton(withTitle: "Record")
+        alert.addButton(withTitle: "Not now")
+        NSApp.activate(ignoringOtherApps: true)
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            startSession(allowedBundleIDs: [call.bundleID])
+            if session != nil { detector.markRecording(bundleID: call.bundleID) }
+        } else {
+            detector.decline(bundleID: call.bundleID)
         }
     }
 
