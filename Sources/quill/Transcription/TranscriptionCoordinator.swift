@@ -231,7 +231,7 @@ private struct SessionMeta {
 
 /// Canonical transcript. Property names are the JSON schema — this struct
 /// exists to be serialized.
-private struct Transcript: Codable {
+struct Transcript: Codable {
     struct Segment: Codable {
         let speaker: String
         let start_ms: Int
@@ -244,16 +244,18 @@ private struct Transcript: Codable {
     let created_at: String
     let segments: [Segment]
 
-    /// Write transcript.json and render transcript.md. Both writes are atomic
-    /// (temp file + rename), so a partially written transcript never exists on
-    /// disk — resumePending treats presence of transcript.json as "done".
+    /// Render Markdown first, then write transcript.json as the durable
+    /// completion marker. Both writes are atomic, so interrupted sessions are
+    /// safely retried instead of being mistaken for complete transcripts.
     func write(to dir: URL) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(self)
-            .write(to: dir.appendingPathComponent("transcript.json"), options: .atomic)
-        try Data(rendered(title: dir.lastPathComponent).utf8)
+        let json = try encoder.encode(self)
+        let markdown = Data(rendered(title: dir.lastPathComponent).utf8)
+        try markdown
             .write(to: dir.appendingPathComponent("transcript.md"), options: .atomic)
+        try json
+            .write(to: dir.appendingPathComponent("transcript.json"), options: .atomic)
     }
 
     private func rendered(title: String) -> String {

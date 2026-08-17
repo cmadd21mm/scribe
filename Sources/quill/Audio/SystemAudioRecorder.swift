@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreAudio
 import Foundation
+import os.lock
 
 /// Records all system audio output to a file via a Core Audio process tap
 /// (macOS 14.2+). No virtual device, no kernel extension — the tap mixes every
@@ -32,12 +33,31 @@ final class SystemAudioRecorder {
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
-    private var file: AVAudioFile?
     private let queue = DispatchQueue(label: "com.digimata.quill.system-tap")
     private(set) var isRecording = false
+
+    private struct LockedState {
+        var file: AVAudioFile?
+        var firstBufferAt: Date?
+        var lastBufferAt: Date?
+    }
+    private let state = OSAllocatedUnfairLock(initialState: LockedState())
+
+    private var file: AVAudioFile? {
+        get { state.withLock { $0.file } }
+        set { state.withLock { $0.file = newValue } }
+    }
     /// Wall-clock time of the first captured buffer — the track's true start,
     /// used to offset-align the two tracks' transcript timestamps.
-    private(set) var firstBufferAt: Date?
+    private(set) var firstBufferAt: Date? {
+        get { state.withLock { $0.firstBufferAt } }
+        set { state.withLock { $0.firstBufferAt = newValue } }
+    }
+
+    private(set) var lastBufferAt: Date? {
+        get { state.withLock { $0.lastBufferAt } }
+        set { state.withLock { $0.lastBufferAt = newValue } }
+    }
 
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
     /// extension — CAF needs no finalization pass, so a crash mid-meeting
@@ -138,7 +158,11 @@ final class SystemAudioRecorder {
         var status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, queue) {
             [weak self] _, inInputData, _, _, _ in
             guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            let now = Date()
+            self.state.withLock {
+                if $0.firstBufferAt == nil { $0.firstBufferAt = now }
+                $0.lastBufferAt = now
+            }
             guard let buffer = AVAudioPCMBuffer(
                 pcmFormat: format,
                 bufferListNoCopy: inInputData,
@@ -170,5 +194,6 @@ final class SystemAudioRecorder {
             tapID = AudioObjectID(kAudioObjectUnknown)
         }
         file = nil
+        lastBufferAt = nil
     }
 }

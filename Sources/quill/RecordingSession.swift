@@ -11,6 +11,13 @@ final class RecordingSession {
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
 
+    private var watchdog: Timer?
+    private var trackSize: [String: Int64] = [:]
+    private var trackLastGrew: [String: Date] = [:]
+    private var trackStalled: Set<String> = []
+    private static let watchdogInterval: TimeInterval = 15
+    private static let stallThreshold: TimeInterval = 45
+
     private static let folderFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy.MM.dd-HHmm"
@@ -42,10 +49,18 @@ final class RecordingSession {
             system.stop()
             throw error
         }
+        watchdog = Timer.scheduledTimer(
+            withTimeInterval: Self.watchdogInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.checkTrackLiveness()
+        }
     }
 
     /// Stop both tracks and write meta.json.
     func stop() {
+        watchdog?.invalidate()
+        watchdog = nil
         mic.stop()
         system.stop()
 
@@ -73,6 +88,34 @@ final class RecordingSession {
             options: [.prettyPrinted, .sortedKeys]
         ) {
             try? data.write(to: dir.appendingPathComponent("meta.json"))
+        }
+    }
+
+    private func checkTrackLiveness() {
+        let now = Date()
+        for name in ["mic", "system"] {
+            let path = dir.appendingPathComponent("\(name).caf").path
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+                  let size = attributes[.size] as? Int64 else { continue }
+
+            if size != trackSize[name] {
+                trackSize[name] = size
+                trackLastGrew[name] = now
+                if trackStalled.remove(name) != nil {
+                    notifyUser(
+                        title: "Quill: \(name) track recovered",
+                        body: "\(name.capitalized) audio is being written again."
+                    )
+                }
+            } else if let last = trackLastGrew[name],
+                      !trackStalled.contains(name),
+                      now.timeIntervalSince(last) >= Self.stallThreshold {
+                trackStalled.insert(name)
+                notifyUser(
+                    title: "Quill: \(name) track stalled",
+                    body: "No \(name) audio has been written for \(Int(now.timeIntervalSince(last))) seconds."
+                )
+            }
         }
     }
 }

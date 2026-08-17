@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os.lock
 
 /// Records the default input device to a file via AVAudioEngine, encoding AAC
 /// mono. Buffers stream straight to disk — nothing is held in memory, so
@@ -28,18 +29,36 @@ final class MicRecorder: @unchecked Sendable {
     }
 
     private var engine = AVAudioEngine()
-    private var file: AVAudioFile?
     private var url: URL?
     private(set) var isRecording = false
+    private var configObserver: NSObjectProtocol?
+    private var restartPending = false
+
+    private struct LockedState {
+        var file: AVAudioFile?
+        var firstBufferAt: Date?
+        var lastBufferAt: Date?
+        var livenessFrames = 0
+        var livenessPeak: Float = 0
+        var livenessSettled = false
+    }
+    private let state = OSAllocatedUnfairLock(initialState: LockedState())
+
+    private var file: AVAudioFile? {
+        get { state.withLock { $0.file } }
+        set { state.withLock { $0.file = newValue } }
+    }
     /// Wall-clock time of the first captured buffer — the track's true start,
     /// used to offset-align the two tracks' transcript timestamps.
-    private(set) var firstBufferAt: Date?
+    private(set) var firstBufferAt: Date? {
+        get { state.withLock { $0.firstBufferAt } }
+        set { state.withLock { $0.firstBufferAt = newValue } }
+    }
 
-    // Liveness check state (voice-processing path only). Written from the tap
-    // callback, read on main when deciding to fall back.
-    private var livenessFrames = 0
-    private var livenessPeak: Float = 0
-    private var livenessSettled = false
+    private var lastBufferAt: Date? {
+        get { state.withLock { $0.lastBufferAt } }
+        set { state.withLock { $0.lastBufferAt = newValue } }
+    }
 
     /// Start capturing the mic, encoding AAC into `url` (use a .caf extension
     /// — CAF needs no finalization pass, so a crash loses nothing written).
@@ -48,15 +67,30 @@ final class MicRecorder: @unchecked Sendable {
         self.url = url
         try attach(voiceProcessing: Config.micVoiceProcessing())
         isRecording = true
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self, (notification.object as? AVAudioEngine) === self.engine else { return }
+            self.handleConfigChange()
+        }
     }
 
     /// Stop capturing and finalize the file. Idempotent.
     func stop() {
         guard isRecording else { return }
         isRecording = false
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+            self.configObserver = nil
+        }
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        file = nil
+        state.withLock {
+            $0.file = nil
+            $0.lastBufferAt = nil
+        }
     }
 
     // MARK: -
@@ -64,7 +98,7 @@ final class MicRecorder: @unchecked Sendable {
     /// Build the engine graph, create the AAC file, and start capture. Called
     /// once at start, and a second time (voiceProcessing: false) if the
     /// liveness check trips.
-    private func attach(voiceProcessing: Bool) throws {
+    private func attach(voiceProcessing: Bool, reusingFile: Bool = false) throws {
         engine = AVAudioEngine()
         let input = engine.inputNode
 
@@ -100,6 +134,22 @@ final class MicRecorder: @unchecked Sendable {
             throw RecorderError.formatUnsupported(inputFormat)
         }
 
+        if reusingFile, let existing = file {
+            try installRawTap(
+                on: input,
+                inputFormat: inputFormat,
+                monoFormat: existing.processingFormat
+            )
+            engine.prepare()
+            do {
+                try engine.start()
+            } catch {
+                input.removeTap(onBus: 0)
+                throw RecorderError.engineStartFailed(error)
+            }
+            return
+        }
+
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: monoFormat.sampleRate,
@@ -122,9 +172,11 @@ final class MicRecorder: @unchecked Sendable {
             // has no sources — nothing is monitored or played — its connection
             // exists solely to give the unit a formatted output path.
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: monoFormat)
-            livenessFrames = 0
-            livenessPeak = 0
-            livenessSettled = false
+            state.withLock {
+                $0.livenessFrames = 0
+                $0.livenessPeak = 0
+                $0.livenessSettled = false
+            }
             installVoiceTap(on: input, format: monoFormat)
         } else {
             try installRawTap(on: input, inputFormat: inputFormat, monoFormat: monoFormat)
@@ -153,23 +205,30 @@ final class MicRecorder: @unchecked Sendable {
         let checkFrames = Int(format.sampleRate)
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            let now = Date()
+            self.state.withLock {
+                if $0.firstBufferAt == nil { $0.firstBufferAt = now }
+                $0.lastBufferAt = now
+            }
 
-            if !self.livenessSettled {
+            let shouldFallBack = self.state.withLock { state in
+                guard !state.livenessSettled else { return false }
                 let frames = Int(buffer.frameLength)
                 if let data = buffer.floatChannelData?[0] {
-                    for i in 0..<frames {
-                        self.livenessPeak = max(self.livenessPeak, abs(data[i]))
+                    for index in 0..<frames {
+                        state.livenessPeak = max(state.livenessPeak, abs(data[index]))
                     }
                 }
-                self.livenessFrames += frames
-                if self.livenessFrames >= checkFrames {
-                    self.livenessSettled = true
-                    if self.livenessPeak == 0 {
-                        DispatchQueue.main.async { self.fallBackToRaw() }
-                        return
-                    }
+                state.livenessFrames += frames
+                if state.livenessFrames >= checkFrames {
+                    state.livenessSettled = true
+                    return state.livenessPeak <= 0.000_001
                 }
+                return false
+            }
+            if shouldFallBack {
+                DispatchQueue.main.async { self.fallBackToRaw() }
+                return
             }
 
             do {
@@ -190,19 +249,100 @@ final class MicRecorder: @unchecked Sendable {
         guard let converter = AVAudioConverter(from: inputFormat, to: monoFormat) else {
             throw RecorderError.formatUnsupported(inputFormat)
         }
+        let sameRate = inputFormat.sampleRate == monoFormat.sampleRate
+        let ratio = monoFormat.sampleRate / inputFormat.sampleRate
         input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             guard let self, let file = self.file else { return }
-            if self.firstBufferAt == nil { self.firstBufferAt = Date() }
+            let now = Date()
+            self.state.withLock {
+                if $0.firstBufferAt == nil { $0.firstBufferAt = now }
+                $0.lastBufferAt = now
+            }
+            let capacity = AVAudioFrameCount(Double(buffer.frameCapacity) * ratio) + 64
             guard let mono = AVAudioPCMBuffer(
                 pcmFormat: monoFormat,
-                frameCapacity: buffer.frameCapacity
+                frameCapacity: capacity
             ) else { return }
             do {
-                try converter.convert(to: mono, from: buffer)
+                if sameRate {
+                    try converter.convert(to: mono, from: buffer)
+                } else {
+                    var fed = false
+                    var conversionError: NSError?
+                    converter.convert(to: mono, error: &conversionError) { _, status in
+                        if fed {
+                            status.pointee = .noDataNow
+                            return nil
+                        }
+                        fed = true
+                        status.pointee = .haveData
+                        return buffer
+                    }
+                    if let conversionError { throw conversionError }
+                }
                 try file.write(from: mono)
             } catch {
                 FileHandle.standardError.write(Data("mic track write failed: \(error)\n".utf8))
             }
+        }
+    }
+
+    /// Restart capture when Zoom, Teams, Meet, FaceTime, or another call app
+    /// changes the active input route after a session has already begun.
+    private func handleConfigChange() {
+        guard isRecording, !restartPending else { return }
+        restartPending = true
+        FileHandle.standardError.write(Data(
+            "mic: input device reconfigured — restarting capture\n".utf8
+        ))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.restartCapture()
+        }
+    }
+
+    private func restartCapture() {
+        restartPending = false
+        guard isRecording else { return }
+        engine.stop()
+        engine.inputNode.removeTap(onBus: 0)
+        padGapWithSilence()
+        do {
+            try attach(voiceProcessing: false, reusingFile: true)
+        } catch {
+            FileHandle.standardError.write(Data(
+                "mic restart failed: \(error) — retrying in 2s\n".utf8
+            ))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.isRecording else { return }
+                self.restartCapture()
+            }
+        }
+    }
+
+    /// Preserve the meeting clock across a route-change interruption so
+    /// transcript timestamps remain aligned with the system-audio track.
+    private func padGapWithSilence() {
+        let snapshot = state.withLock { ($0.file, $0.lastBufferAt) }
+        guard let file = snapshot.0, let last = snapshot.1 else { return }
+        let gap = Date().timeIntervalSince(last)
+        guard gap > 0.05 else { return }
+
+        let format = file.processingFormat
+        var remaining = AVAudioFrameCount(gap * format.sampleRate)
+        let chunk = AVAudioFrameCount(format.sampleRate)
+        while remaining > 0 {
+            let count = min(remaining, chunk)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
+                return
+            }
+            buffer.frameLength = count
+            if let channels = buffer.floatChannelData {
+                for channel in 0..<Int(format.channelCount) {
+                    channels[channel].update(repeating: 0, count: Int(count))
+                }
+            }
+            try? file.write(from: buffer)
+            remaining -= count
         }
     }
 
@@ -216,8 +356,11 @@ final class MicRecorder: @unchecked Sendable {
         ))
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
-        file = nil
-        firstBufferAt = nil
+        state.withLock {
+            $0.file = nil
+            $0.firstBufferAt = nil
+            $0.lastBufferAt = nil
+        }
         if let url {
             try? FileManager.default.removeItem(at: url)
         }
