@@ -8,7 +8,7 @@ jobs:
   macos:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Block runtime networking
         run: sh scripts/check-no-runtime-network.sh
       - name: Test
@@ -19,7 +19,7 @@ jobs:
         run: sh scripts/build-app.sh
       - name: Verify signature
         run: codesign --verify --deep --strict dist/Scribe.app
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Scribe-macOS
           path: dist/Scribe.app
