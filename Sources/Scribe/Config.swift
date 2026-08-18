@@ -1,5 +1,21 @@
 import Foundation
 
+enum ScribeAppearance: String, CaseIterable, Codable, Identifiable, Sendable {
+    case system
+    case light
+    case dark
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+}
+
 struct ScribeConfiguration: Codable, Equatable, Sendable {
     struct Transcription: Codable, Equatable, Sendable {
         var enabled: Bool? = nil
@@ -43,6 +59,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
     var minimumFreeDiskGB: Double? = nil
     var promptForCalls: Bool? = nil
     var noteStyle: String? = nil
+    var appearance: String? = nil
     var intelligence: Intelligence? = nil
 
     enum CodingKeys: String, CodingKey {
@@ -55,6 +72,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
         case minimumFreeDiskGB = "minimum_free_disk_gb"
         case promptForCalls = "prompt_for_calls"
         case noteStyle = "note_style"
+        case appearance
         case intelligence
     }
 }
@@ -130,6 +148,10 @@ enum Config {
 
     static func noteStyle() -> MeetingNoteStyle {
         load()?.noteStyle.flatMap(MeetingNoteStyle.init(rawValue:)) ?? .balanced
+    }
+
+    static func appearance() -> ScribeAppearance {
+        load()?.appearance.flatMap(ScribeAppearance.init(rawValue:)) ?? .system
     }
 
     static func aiSettings() -> ScribeAISettings {

@@ -18,7 +18,7 @@ final class ScribeWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = false
         window.minSize = NSSize(width: 1_040, height: 700)
-        window.backgroundColor = NSColor(red: 0.988, green: 0.979, blue: 0.955, alpha: 1)
+        window.backgroundColor = .windowBackgroundColor
         window.contentView = hosting
         window.center()
         window.setFrameAutosaveName("Scribe.MainWindow")

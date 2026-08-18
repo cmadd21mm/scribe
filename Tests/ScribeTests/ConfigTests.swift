@@ -15,6 +15,7 @@ struct ConfigTests {
           "minimum_free_disk_gb": 3.5,
           "prompt_for_calls": false,
           "note_style": "action-focused",
+          "appearance": "dark",
           "mic_voice_processing": true,
           "transcription": {"enabled": true, "engine": "parakeet", "model": "parakeet-v3"},
           "intelligence": {"provider": "venice", "model": "test-model", "redact_sensitive": true},
@@ -35,6 +36,7 @@ struct ConfigTests {
         #expect(document.micVoiceProcessing == true)
         #expect(document.promptForCalls == false)
         #expect(document.noteStyle == "action-focused")
+        #expect(document.appearance == "dark")
         #expect(document.transcription?.engine == "parakeet")
         #expect(document.transcription?.model == "parakeet-v3")
         #expect(document.intelligence?.provider == "venice")

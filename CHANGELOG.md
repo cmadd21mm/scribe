@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed Ask Scribe text visibility and focus on Macs using Dark appearance.
+- Suggested questions now populate the input so they can be reviewed or edited
+  before asking.
+- AI Settings now opens reliably inside Ask Scribe instead of attempting to
+  stack a second macOS sheet.
+- Added System, Light, and Dark appearance choices with an adaptive warm palette.
+
 ## 0.2.0
 
 - Rebuilt Settings rows with consistent icon/text alignment, explicit colors,

@@ -23,6 +23,7 @@ struct ScribeAppView: View {
         }
         .frame(minWidth: 1_040, minHeight: 700)
         .background(ScribeTheme.paper)
+        .preferredColorScheme(model.appearance.colorScheme)
         .sheet(isPresented: $model.showSettings) {
             ScribeSettingsView(model: model)
         }
@@ -157,7 +158,7 @@ private struct MeetingSidebar: View {
                 }
                 .padding(.horizontal, 12)
                 .frame(height: 34)
-                .background(Color.white.opacity(0.55))
+                .background(ScribeTheme.surface.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -736,7 +737,7 @@ private struct MeetingNotesEditor: View {
                 .font(ScribeTheme.sans(14))
                 .scrollContentBackground(.hidden)
                 .padding(10)
-                .background(Color.white.opacity(0.58))
+                .background(ScribeTheme.surface.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -942,9 +943,25 @@ private struct ScribeAssistantView: View {
     @State private var messages: [ScribeChatMessage] = []
     @State private var scope: Scope = .meeting
     @State private var isAnswering = false
+    @State private var showingAISettings = false
     @FocusState private var questionFocused: Bool
 
     var body: some View {
+        Group {
+            if showingAISettings {
+                ScribeAISettingsView(model: model) {
+                    showingAISettings = false
+                    DispatchQueue.main.async {
+                        questionFocused = true
+                    }
+                }
+            } else {
+                assistantContent
+            }
+        }
+    }
+
+    private var assistantContent: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1010,6 +1027,8 @@ private struct ScribeAssistantView: View {
                     TextField("Ask about a decision, person, deadline, or topic…", text: $question)
                         .textFieldStyle(.plain)
                         .font(ScribeTheme.sans(13))
+                        .foregroundStyle(ScribeTheme.ink)
+                        .tint(ScribeTheme.coral)
                         .focused($questionFocused)
                         .onSubmit(ask)
                     Button("Ask", action: ask)
@@ -1017,7 +1036,7 @@ private struct ScribeAssistantView: View {
                         .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAnswering)
                 }
                 .padding(10)
-                .background(Color.white.opacity(0.62))
+                .background(ScribeTheme.surface.opacity(0.78))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(ScribeTheme.divider, lineWidth: 1))
 
@@ -1031,7 +1050,10 @@ private struct ScribeAssistantView: View {
                         .scribePointer()
                         .font(ScribeTheme.sans(10, weight: .medium))
                         .foregroundStyle(ScribeTheme.mutedInk)
-                    Button("AI settings…") { model.showAISettings = true }
+                    Button("AI settings…") {
+                        questionFocused = false
+                        showingAISettings = true
+                    }
                         .buttonStyle(.plain)
                         .scribePointer()
                         .font(ScribeTheme.sans(10, weight: .medium))
@@ -1043,9 +1065,6 @@ private struct ScribeAssistantView: View {
         .frame(width: 760, height: 700)
         .background(ScribeTheme.paper)
         .onAppear { questionFocused = true }
-        .sheet(isPresented: $model.showAISettings) {
-            ScribeAISettingsView(model: model)
-        }
     }
 
     private var selectedMeetings: [MeetingRecord] {
@@ -1079,12 +1098,15 @@ private struct ScribeAssistantView: View {
         }
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.38))
+        .background(ScribeTheme.surface.opacity(0.58))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
     private func suggestion(_ text: String) -> some View {
-        Button(text) { question = text; ask() }
+        Button(text) {
+            question = text
+            questionFocused = true
+        }
             .buttonStyle(.plain)
             .scribePointer()
             .font(ScribeTheme.sans(12, weight: .medium))
@@ -1121,7 +1143,7 @@ private struct ScribeAssistantView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(message.role == .user ? ScribeTheme.selection.opacity(0.48) : Color.white.opacity(0.5))
+        .background(message.role == .user ? ScribeTheme.selection.opacity(0.60) : ScribeTheme.surface.opacity(0.70))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 
@@ -1276,7 +1298,7 @@ private struct ScribeFollowUpView: View {
                 .font(ScribeTheme.sans(13))
                 .scrollContentBackground(.hidden)
                 .padding(10)
-                .background(Color.white.opacity(0.58))
+                .background(ScribeTheme.surface.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(ScribeTheme.divider, lineWidth: 1))
             HStack {
@@ -1354,7 +1376,7 @@ private struct ScribeDecisionLogView: View {
                                         .foregroundStyle(ScribeTheme.faintInk)
                                 }
                                 .padding(14)
-                                .background(Color.white.opacity(0.48))
+                                .background(ScribeTheme.surface.opacity(0.68))
                                 .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                             }
                             .buttonStyle(.plain)
