@@ -477,10 +477,16 @@ struct ScribeAISettingsView: View {
         self.onClose = onClose
         let current = model.aiSettings
         _provider = State(initialValue: current.provider)
-        _modelName = State(initialValue: current.model)
+        let starterModels = current.provider == .venice
+            ? ScribeAIModelCatalog.veniceFallbackModels
+            : []
+        _modelName = State(initialValue: current.model.isEmpty
+            ? (starterModels.first?.id ?? "")
+            : current.model)
         _baseURL = State(initialValue: current.baseURL)
         _apiKey = State(initialValue: ScribeKeychain.apiKey(provider: current.provider))
         _redactSensitive = State(initialValue: current.redactSensitive)
+        _availableModels = State(initialValue: starterModels)
     }
 
     var body: some View {
@@ -515,8 +521,10 @@ struct ScribeAISettingsView: View {
                 .onChange(of: provider) { _, value in
                     baseURL = value.defaultBaseURL
                     apiKey = ScribeKeychain.apiKey(provider: value)
-                    modelName = ""
-                    availableModels = []
+                    availableModels = value == .venice
+                        ? ScribeAIModelCatalog.veniceFallbackModels
+                        : []
+                    modelName = availableModels.first?.id ?? ""
                     modelSearch = ""
                     modelLoadError = nil
                     usesManualModelEntry = false

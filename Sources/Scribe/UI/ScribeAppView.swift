@@ -399,7 +399,8 @@ private struct MeetingDetail: View {
                                     Label(
                                         model.regeneratingMeetingID == meeting.id
                                             ? "Generating summary…"
-                                            : "Generate summary",
+                                            : model.configuredSummaryAIName.map { "Generate with \($0)" }
+                                                ?? "Generate summary",
                                         systemImage: "sparkles"
                                     )
                                 }
@@ -421,7 +422,8 @@ private struct MeetingDetail: View {
                                 Button(
                                     model.regeneratingMeetingID == meeting.id
                                         ? "Refreshing summary…"
-                                        : "Regenerate summary"
+                                        : model.configuredSummaryAIName.map { "Regenerate with \($0)" }
+                                            ?? "Regenerate summary"
                                 ) {
                                     model.regenerateSelectedNote()
                                 }
@@ -550,7 +552,10 @@ private struct MeetingDetail: View {
                     model.showRenameEditor = true
                 }
                 Button(
-                    model.regeneratingMeetingID == meeting.id ? "Refreshing notes…" : "Refresh notes",
+                    model.regeneratingMeetingID == meeting.id
+                        ? "Refreshing notes…"
+                        : model.configuredSummaryAIName.map { "Refresh with \($0)" }
+                            ?? "Refresh notes",
                     systemImage: "arrow.triangle.2.circlepath"
                 ) {
                     model.regenerateSelectedNote()

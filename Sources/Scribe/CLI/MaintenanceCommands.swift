@@ -27,14 +27,59 @@ struct RegenerateNote: AsyncParsableCommand {
     @Argument(help: "Meeting directory containing transcript.md and meta.json.")
     var directory: String
 
+    @Flag(name: .long, help: "Use the AI provider and model selected in Scribe Settings.")
+    var useAI = false
+
     func run() async throws {
         let dir = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
         let transcript = try String(
             contentsOf: dir.appendingPathComponent("transcript.md"),
             encoding: .utf8
         )
-        try await NotePipeline.generate(sessionDir: dir, transcriptMarkdown: transcript)
+        let settings = Config.aiSettings()
+        if useAI {
+            guard settings.provider != .local else {
+                throw ValidationError("Choose a remote AI provider in Scribe Settings first.")
+            }
+            try await NotePipeline.generate(
+                sessionDir: dir,
+                transcriptMarkdown: transcript,
+                summarizer: ScribeRemoteMeetingSummarizer(settings: settings),
+                generatedLocally: false
+            )
+        } else {
+            try await NotePipeline.generate(sessionDir: dir, transcriptMarkdown: transcript)
+        }
         print("note ready at \(dir.appendingPathComponent("note.md").path)")
+    }
+}
+
+struct ConfigureAI: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "configure-ai",
+        abstract: "Select an AI provider and model without placing API keys in configuration files."
+    )
+
+    @Option(name: .long, help: "Provider: local, venice, openai, claude, xai, or custom.")
+    var provider: String
+
+    @Option(name: .long, help: "Provider model ID.")
+    var model: String = ""
+
+    func run() throws {
+        guard let selected = ScribeAIProvider(rawValue: provider) else {
+            throw ValidationError("Unknown AI provider '\(provider)'.")
+        }
+        try Config.update { configuration in
+            let current = configuration.intelligence
+            configuration.intelligence = .init(
+                provider: selected.rawValue,
+                model: model,
+                baseURL: selected.defaultBaseURL,
+                redactSensitive: current?.redactSensitive ?? true
+            )
+        }
+        print("AI model set to \(selected.title) · \(model.isEmpty ? "not selected" : model)")
     }
 }
 
