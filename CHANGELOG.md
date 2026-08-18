@@ -11,3 +11,5 @@
 - Fully local Parakeet transcription and optional local llama.cpp summaries.
 - First-run onboarding, preferences, menu-bar controls, launch at login,
   privacy guidance, app icon, `.app` builder, DMG packaging, and release CI.
+- Universal Apple-silicon and Intel Mac installer, signed with Developer ID and
+  notarized for normal Gatekeeper installation.

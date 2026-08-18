@@ -6,6 +6,9 @@ DIST_DIR=${SCRIBE_DIST_DIR:-"$PROJECT_ROOT/dist"}
 STAGING_DIR="$DIST_DIR/dmg-root"
 DMG_PATH="$DIST_DIR/Scribe.dmg"
 
+# Installers are universal by default. Set SCRIBE_UNIVERSAL=0 only for a
+# faster architecture-native development package.
+export SCRIBE_UNIVERSAL=${SCRIBE_UNIVERSAL:-1}
 "$PROJECT_ROOT/scripts/build-app.sh"
 
 rm -rf "$STAGING_DIR" "$DMG_PATH"

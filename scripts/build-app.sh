@@ -8,11 +8,20 @@ ICONSET_DIR="$DIST_DIR/Scribe.iconset"
 ICON_SOURCE="$PROJECT_ROOT/Assets/Brand/ScribeAppIcon-1024.png"
 
 cd "$PROJECT_ROOT"
-swift build -c release --product scribe
+if [ "${SCRIBE_UNIVERSAL:-0}" = "1" ]; then
+    UNIVERSAL_BUILD_DIR="$PROJECT_ROOT/.build-universal"
+    swift build -c release --product scribe \
+        --arch arm64 --arch x86_64 \
+        --scratch-path "$UNIVERSAL_BUILD_DIR"
+    SCRIBE_BINARY="$UNIVERSAL_BUILD_DIR/apple/Products/Release/scribe"
+else
+    swift build -c release --product scribe
+    SCRIBE_BINARY="$PROJECT_ROOT/.build/release/scribe"
+fi
 
 rm -rf "$APP_DIR" "$ICONSET_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$ICONSET_DIR"
-cp ".build/release/scribe" "$APP_DIR/Contents/MacOS/Scribe"
+cp "$SCRIBE_BINARY" "$APP_DIR/Contents/MacOS/Scribe"
 cp "Sources/Scribe/Info.plist" "$APP_DIR/Contents/Info.plist"
 
 make_icon() {

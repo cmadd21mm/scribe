@@ -46,8 +46,8 @@ important.
 ## Download and install
 
 Download `Scribe.dmg` from the repository's **Releases** page, open it, and drag
-Scribe into Applications. macOS 15 or newer is required. The first recording
-asks for:
+Scribe into Applications. The universal download supports both Apple silicon
+and Intel Macs running macOS 15 or newer. The first recording asks for:
 
 - Microphone access for your side
 - Screen & System Audio Recording for the other side
