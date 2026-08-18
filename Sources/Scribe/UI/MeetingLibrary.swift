@@ -565,6 +565,7 @@ final class ScribeAppModel: ObservableObject {
     @Published private(set) var enabledBundleIDs: Set<String>
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var noteStyle: MeetingNoteStyle
+    @Published private(set) var appearance: ScribeAppearance
     @Published private(set) var transcriptionModel: LocalTranscriptionModel
     @Published private(set) var aiSettings: ScribeAISettings
     @Published var downloadingModelID: String?
@@ -586,6 +587,7 @@ final class ScribeAppModel: ObservableObject {
         enabledBundleIDs = Config.callAppBundleIDs()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         noteStyle = Config.noteStyle()
+        appearance = Config.appearance()
         transcriptionModel = .selected
         aiSettings = Config.aiSettings()
         showOnboarding = !demo && !UserDefaults.standard.bool(forKey: "scribe.onboarding.complete")
@@ -880,6 +882,11 @@ final class ScribeAppModel: ObservableObject {
     func setNoteStyle(_ style: MeetingNoteStyle) {
         noteStyle = style
         persist { $0.noteStyle = style.rawValue }
+    }
+
+    func setAppearance(_ selected: ScribeAppearance) {
+        appearance = selected
+        persist { $0.appearance = selected.rawValue }
     }
 
     func saveAISettings(_ settings: ScribeAISettings, apiKey: String) {

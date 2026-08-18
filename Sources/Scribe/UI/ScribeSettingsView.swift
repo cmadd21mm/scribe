@@ -27,6 +27,32 @@ struct ScribeSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     settingsSection("General") {
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "circle.lefthalf.filled")
+                                .foregroundStyle(ScribeTheme.ink)
+                                .frame(width: 28, height: 24)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Appearance")
+                                    .font(ScribeTheme.sans(13, weight: .medium))
+                                    .foregroundStyle(ScribeTheme.ink)
+                                Text("Follow this Mac or keep Scribe in your preferred theme.")
+                                    .font(ScribeTheme.sans(10))
+                                    .foregroundStyle(ScribeTheme.faintInk)
+                            }
+                            Spacer()
+                            Picker("Appearance", selection: Binding(
+                                get: { model.appearance },
+                                set: { model.setAppearance($0) }
+                            )) {
+                                ForEach(ScribeAppearance.allCases) { appearance in
+                                    Text(appearance.title).tag(appearance)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.segmented)
+                            .frame(width: 190)
+                            .scribePointer()
+                        }
                         settingToggle(
                             "Launch Scribe at login",
                             detail: "Keeps the menu-bar control ready without opening a recording.",
@@ -270,7 +296,7 @@ struct ScribeSettingsView: View {
                 .foregroundStyle(ScribeTheme.coral)
             VStack(spacing: 12) { content() }
                 .padding(16)
-                .background(Color.white.opacity(0.48))
+                .background(ScribeTheme.surface.opacity(0.68))
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -413,7 +439,7 @@ struct ScribeModelManagerView: View {
         }
         .padding(15)
         .frame(minHeight: 78)
-        .background(selected ? ScribeTheme.selection.opacity(0.52) : Color.white.opacity(0.48))
+        .background(selected ? ScribeTheme.selection.opacity(0.62) : ScribeTheme.surface.opacity(0.68))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -425,14 +451,16 @@ struct ScribeModelManagerView: View {
 struct ScribeAISettingsView: View {
     @ObservedObject var model: ScribeAppModel
     @Environment(\.dismiss) private var dismiss
+    private let onClose: (() -> Void)?
     @State private var provider: ScribeAIProvider
     @State private var modelName: String
     @State private var baseURL: String
     @State private var apiKey: String
     @State private var redactSensitive: Bool
 
-    init(model: ScribeAppModel) {
+    init(model: ScribeAppModel, onClose: (() -> Void)? = nil) {
         self.model = model
+        self.onClose = onClose
         let current = model.aiSettings
         _provider = State(initialValue: current.provider)
         _modelName = State(initialValue: current.model)
@@ -453,7 +481,7 @@ struct ScribeAISettingsView: View {
                         .foregroundStyle(ScribeTheme.mutedInk)
                 }
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { close() }
                     .keyboardShortcut(.cancelAction)
                     .scribePointer()
             }
@@ -531,6 +559,7 @@ struct ScribeAISettingsView: View {
                             ),
                             apiKey: apiKey
                         )
+                        onClose?()
                     }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
@@ -541,6 +570,14 @@ struct ScribeAISettingsView: View {
         }
         .frame(width: 610, height: provider == .local ? 390 : 590)
         .background(ScribeTheme.paper)
+    }
+
+    private func close() {
+        if let onClose {
+            onClose()
+        } else {
+            dismiss()
+        }
     }
 
     private func fieldLabel(_ value: String) -> some View {
@@ -617,7 +654,7 @@ struct ScribeOnboardingView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 125, alignment: .topLeading)
         .padding(16)
-        .background(Color.white.opacity(0.52))
+        .background(ScribeTheme.surface.opacity(0.70))
         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 9, style: .continuous)

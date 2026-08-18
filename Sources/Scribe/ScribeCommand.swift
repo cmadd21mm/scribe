@@ -48,6 +48,9 @@ struct DemoSnapshot: AsyncParsableCommand {
     @Option(name: .long, help: "Screen to render: library, rename, settings, models, intelligence, or onboarding.")
     private var screen: DemoSnapshotScreen = .library
 
+    @Option(name: .long, help: "Appearance to render: light or dark.")
+    private var appearance: String = "light"
+
     func run() async throws {
         try await render()
     }
@@ -77,9 +80,15 @@ struct DemoSnapshot: AsyncParsableCommand {
             size = CGSize(width: 760, height: 570)
             selectedView = AnyView(ScribeOnboardingView(model: model))
         }
+        let scheme: ColorScheme
+        switch appearance.lowercased() {
+        case "light": scheme = .light
+        case "dark": scheme = .dark
+        default: throw ValidationError("appearance must be light or dark")
+        }
         let content = selectedView
             .frame(width: size.width, height: size.height)
-            .environment(\.colorScheme, .light)
+            .environment(\.colorScheme, scheme)
         let hosting = NSHostingView(rootView: content)
         hosting.frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(
