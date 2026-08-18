@@ -82,4 +82,32 @@ struct MeetingLibraryTests {
             try MeetingLibraryReader.rename(meeting, to: "  ")
         }
     }
+
+    @Test("Legacy two-track meetings are not mislabeled as in person")
+    func legacyOnlineMeetingSource() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-source-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(#"{"state":"complete","title":"Call","files":{"mic":"mic.caf","system":"system.caf"}}"#.utf8)
+            .write(to: root.appendingPathComponent("meta.json"))
+        try Data().write(to: root.appendingPathComponent("system.caf"))
+
+        let meeting = try #require(MeetingLibraryReader.read(directory: root))
+        #expect(meeting.sourceName == "Online meeting")
+    }
+
+    @Test("A saved source name takes precedence over legacy metadata")
+    func sourceNameOverride() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-source-override-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(#"{"state":"complete","title":"Call"}"#.utf8)
+            .write(to: root.appendingPathComponent("meta.json"))
+        try MeetingLibraryReader.setSourceName("Google Meet", for: root)
+
+        let meeting = try #require(MeetingLibraryReader.read(directory: root))
+        #expect(meeting.sourceName == "Google Meet")
+    }
 }

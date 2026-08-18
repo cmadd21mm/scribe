@@ -52,6 +52,9 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     var state: String
     var attendees: [String]
     var sourceBundleID: String?
+    var sourceLabel: String? = nil
+    var captureKind: String? = nil
+    var capturedSystemAudio: Bool = false
     var summary: String
     var decisions: [String]
     var actionItems: [MeetingActionItem]
@@ -66,7 +69,13 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     var hasTranscript: Bool { !transcript.isEmpty }
 
     var sourceName: String {
-        guard let sourceBundleID else { return "In person" }
+        if let sourceLabel, !sourceLabel.isEmpty { return sourceLabel }
+        guard let sourceBundleID else {
+            if captureKind == "in_person" || (isDemo && !capturedSystemAudio) {
+                return "In person"
+            }
+            return capturedSystemAudio ? "Online meeting" : "Source not detected"
+        }
         switch sourceBundleID {
         case "us.zoom.xos": return "Zoom"
         case "com.microsoft.teams2", "com.microsoft.teams": return "Microsoft Teams"
@@ -178,6 +187,9 @@ enum MeetingLibraryReader {
         let title: String?
         let attendees: [String]?
         let source_bundle_id: String?
+        let source_name: String?
+        let capture_kind: String?
+        let files: [String: String]?
     }
 
     private struct TranscriptFile: Decodable {
@@ -239,6 +251,11 @@ enum MeetingLibraryReader {
             state: metadata.state ?? "complete",
             attendees: metadata.attendees ?? [],
             sourceBundleID: metadata.source_bundle_id,
+            sourceLabel: metadata.source_name,
+            captureKind: metadata.capture_kind,
+            capturedSystemAudio: metadata.files?["system"].map {
+                FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+            } ?? false,
             summary: cleanSection(sections["summary"] ?? fallbackSummary(transcript: transcript)),
             decisions: parseList(sections["decisions"] ?? ""),
             actionItems: actions,
@@ -266,6 +283,24 @@ enum MeetingLibraryReader {
             to: meeting.directory.appendingPathComponent("action-state.json"),
             options: .atomic
         )
+    }
+
+    static func setSourceName(_ name: String, for directory: URL) throws {
+        let metadataURL = directory.appendingPathComponent("meta.json")
+        let original = try Data(contentsOf: metadataURL)
+        guard var metadata = try JSONSerialization.jsonObject(with: original) as? [String: Any]
+        else { throw LibraryError.unreadableMeeting }
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.isEmpty {
+            metadata.removeValue(forKey: "source_name")
+        } else {
+            metadata["source_name"] = cleaned
+        }
+        let updated = try JSONSerialization.data(
+            withJSONObject: metadata,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        try updated.write(to: metadataURL, options: .atomic)
     }
 
     static func rename(_ meeting: MeetingRecord, to proposedTitle: String) throws -> MeetingRecord {
@@ -501,7 +536,7 @@ enum MeetingLibraryReader {
     private static func fallbackSummary(transcript: [MeetingTranscriptLine]) -> String {
         transcript.isEmpty
             ? "This meeting is waiting for local transcription."
-            : "The transcript is ready. Scribe is preparing private meeting notes on this Mac."
+            : ""
     }
 
     private static func displaySpeaker(_ raw: String) -> String {
@@ -889,7 +924,8 @@ final class ScribeAppModel: ObservableObject {
         persist { $0.appearance = selected.rawValue }
     }
 
-    func saveAISettings(_ settings: ScribeAISettings, apiKey: String) {
+    @discardableResult
+    func saveAISettings(_ settings: ScribeAISettings, apiKey: String) -> Bool {
         do {
             if settings.provider.needsAPIKey {
                 try ScribeKeychain.saveAPIKey(apiKey, provider: settings.provider)
@@ -904,8 +940,10 @@ final class ScribeAppModel: ObservableObject {
                 )
             }
             showAISettings = false
+            return true
         } catch {
             alertMessage = "Scribe couldn’t save the AI connection: \(error.localizedDescription)"
+            return false
         }
     }
 

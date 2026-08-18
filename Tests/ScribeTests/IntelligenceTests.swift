@@ -13,7 +13,7 @@ struct IntelligenceTests {
         )
         #expect(request.url?.absoluteString == "https://api.venice.ai/api/v1/models?type=text")
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
-        #expect(request.timeoutInterval == 12)
+        #expect(request.timeoutInterval == 8)
     }
 
     @Test("Venice model discovery can retry with authentication if its catalog requires it")

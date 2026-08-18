@@ -388,11 +388,55 @@ private struct MeetingDetail: View {
 
                     ScribeSectionDivider().padding(.vertical, 22)
                     contentSection(title: "Summary") {
-                    Text(meeting.summary)
-                            .font(ScribeTheme.sans(15))
-                            .foregroundStyle(ScribeTheme.ink)
-                            .lineSpacing(5)
-                            .textSelection(.enabled)
+                        if meeting.summary.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("The transcript is ready. Generate private notes on this Mac when you’re ready.")
+                                    .font(ScribeTheme.sans(13))
+                                    .foregroundStyle(ScribeTheme.mutedInk)
+                                Button {
+                                    model.regenerateSelectedNote()
+                                } label: {
+                                    Label(
+                                        model.regeneratingMeetingID == meeting.id
+                                            ? "Generating summary…"
+                                            : "Generate summary",
+                                        systemImage: "sparkles"
+                                    )
+                                }
+                                .buttonStyle(ScribePrimaryButtonStyle())
+                                .disabled(
+                                    meeting.isDemo
+                                        || !meeting.hasTranscript
+                                        || meeting.state == "recording"
+                                        || model.regeneratingMeetingID != nil
+                                )
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text(meeting.summary)
+                                    .font(ScribeTheme.sans(15))
+                                    .foregroundStyle(ScribeTheme.ink)
+                                    .lineSpacing(5)
+                                    .textSelection(.enabled)
+                                Button(
+                                    model.regeneratingMeetingID == meeting.id
+                                        ? "Refreshing summary…"
+                                        : "Regenerate summary"
+                                ) {
+                                    model.regenerateSelectedNote()
+                                }
+                                .buttonStyle(.plain)
+                                .font(ScribeTheme.sans(10, weight: .medium))
+                                .foregroundStyle(ScribeTheme.coral)
+                                .disabled(
+                                    meeting.isDemo
+                                        || !meeting.hasTranscript
+                                        || meeting.state == "recording"
+                                        || model.regeneratingMeetingID != nil
+                                )
+                                .scribePointer()
+                            }
+                        }
                     }
 
                     ScribeSectionDivider().padding(.vertical, 22)

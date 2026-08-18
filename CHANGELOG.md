@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6
+
+- Added true microphone-only recording for in-person meetings; manual online
+  recordings now infer the active call app when possible.
+- Stopped treating missing legacy source metadata as “In person,” and added a
+  safe source-label correction path for older recordings.
+- Added visible Generate summary and Regenerate summary actions to every
+  meeting, including transcript-only recordings from older releases.
+- Let API keys save to Keychain before a model is selected, with clear saved
+  confirmation and save failures that remain visible.
+- Reduced model-catalog waits to eight seconds and added a verified Venice
+  fallback list so a temporary catalog outage cannot block setup.
+
 ## 0.2.5
 
 - Made Venice model discovery use its fast public text-model catalog first,

@@ -114,13 +114,38 @@ enum ScribeAIError: LocalizedError {
 }
 
 enum ScribeAIModelCatalog {
+    /// A small last-resort Venice list verified against the public catalog.
+    /// It keeps setup usable during a transient catalog outage; Refresh still
+    /// asks Venice for the complete current list.
+    static let veniceFallbackModels: [ScribeAIModelOption] = [
+        .init(
+            id: "zai-org-glm-4.7",
+            title: "GLM 4.7",
+            detail: "Venice default general-purpose model",
+            isRecommended: true
+        ),
+        .init(
+            id: "venice-uncensored-1-2",
+            title: "Venice Uncensored 1.2",
+            detail: "Private, open-ended conversation",
+            isRecommended: false
+        ),
+        .init(
+            id: "mercury-2",
+            title: "Mercury 2",
+            detail: "Fast reasoning",
+            isRecommended: false
+        ),
+    ]
+
     static func fetch(
         provider: ScribeAIProvider,
         baseURL: String,
         apiKey: String,
-        session: URLSession = .shared
+        session: URLSession? = nil
     ) async throws -> [ScribeAIModelOption] {
         guard provider != .local else { return [] }
+        let session = session ?? catalogSession()
         var request = try modelListRequest(
             provider: provider,
             baseURL: baseURL,
@@ -171,7 +196,7 @@ enum ScribeAIModelCatalog {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
-        request.timeoutInterval = 12
+        request.timeoutInterval = 8
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if provider == .claude {
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
@@ -180,6 +205,15 @@ enum ScribeAIModelCatalog {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
         return request
+    }
+
+    private static func catalogSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 8
+        configuration.timeoutIntervalForResource = 8
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        return URLSession(configuration: configuration)
     }
 
     private static func models(
