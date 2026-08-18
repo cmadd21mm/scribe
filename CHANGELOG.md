@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Replaced manual AI model-name setup with an account-aware, searchable model
+  picker for Venice AI, OpenAI, Claude, Grok/xAI, and custom compatible APIs.
+- Added provider-specific model discovery, sensible default selection, refresh,
+  clear loading and error states, and a manual-ID fallback for private models.
+- Added Developer ID signing for the outer DMG as well as the app bundle so
+  Gatekeeper can validate both release layers directly.
+
 ## 0.2.2
 
 - Fixed Check for Updates from Settings by dismissing the Settings sheet before

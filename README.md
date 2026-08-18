@@ -106,7 +106,10 @@ open questions. An optional locally installed `llama.cpp` executable and GGUF
 model can make those notes richer; the built-in fallback requires no setup.
 
 Ask Scribe also works locally with timestamped retrieval. Optional remote AI
-connections use an API key stored in the Mac Keychain. Ordinary ChatGPT,
+connections use an API key stored in the Mac Keychain. Scribe can fetch the
+text models available to that key from Venice AI, OpenAI, Claude, Grok/xAI, or
+a custom OpenAI-compatible endpoint and presents them in a searchable picker;
+manual model IDs remain available for private endpoints. Ordinary ChatGPT,
 Claude, Grok, or Venice subscriptions may not include API access. Scribe sends
 only the selected context after the user asks a question, redacts common
 contact details by default, and sets `store: false` for OpenAI requests.

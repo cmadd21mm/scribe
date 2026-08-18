@@ -463,6 +463,12 @@ struct ScribeAISettingsView: View {
     @State private var baseURL: String
     @State private var apiKey: String
     @State private var redactSensitive: Bool
+    @State private var availableModels: [ScribeAIModelOption] = []
+    @State private var modelSearch = ""
+    @State private var isLoadingModels = false
+    @State private var modelLoadError: String?
+    @State private var usesManualModelEntry = false
+    @State private var modelRequestID = UUID()
 
     init(model: ScribeAppModel, onClose: (() -> Void)? = nil) {
         self.model = model
@@ -507,7 +513,13 @@ struct ScribeAISettingsView: View {
                 .onChange(of: provider) { _, value in
                     baseURL = value.defaultBaseURL
                     apiKey = ScribeKeychain.apiKey(provider: value)
-                    if value == .local { modelName = "" }
+                    modelName = ""
+                    availableModels = []
+                    modelSearch = ""
+                    modelLoadError = nil
+                    usesManualModelEntry = false
+                    modelRequestID = UUID()
+                    isLoadingModels = false
                 }
 
                 if provider == .local {
@@ -520,21 +532,34 @@ struct ScribeAISettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 } else {
                     VStack(alignment: .leading, spacing: 7) {
-                        fieldLabel("Model name")
-                        TextField("Use a model available in your provider account", text: $modelName)
+                        fieldLabel(provider.needsAPIKey ? "API key" : "API key (optional)")
+                        SecureField("Stored in your Mac Keychain", text: $apiKey)
                             .textFieldStyle(.roundedBorder)
+                            .onChange(of: apiKey) { _, _ in
+                                availableModels = []
+                                modelSearch = ""
+                                modelLoadError = nil
+                                modelRequestID = UUID()
+                                isLoadingModels = false
+                            }
                     }
                     VStack(alignment: .leading, spacing: 7) {
                         fieldLabel("API address")
                         TextField("Provider API address", text: $baseURL)
                             .textFieldStyle(.roundedBorder)
                             .disabled(provider != .custom)
+                            .onChange(of: baseURL) { _, _ in
+                                guard provider == .custom else { return }
+                                availableModels = []
+                                modelSearch = ""
+                                modelLoadError = nil
+                                modelRequestID = UUID()
+                                isLoadingModels = false
+                            }
                     }
-                    VStack(alignment: .leading, spacing: 7) {
-                        fieldLabel(provider.needsAPIKey ? "API key" : "API key (optional)")
-                        SecureField("Stored in your Mac Keychain", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
+
+                    modelPicker
+
                     Toggle("Redact email addresses and phone numbers before sending context", isOn: $redactSensitive)
                         .toggleStyle(.checkbox)
                         .font(ScribeTheme.sans(11))
@@ -574,8 +599,194 @@ struct ScribeAISettingsView: View {
             }
             .padding(24)
         }
-        .frame(width: 610, height: provider == .local ? 390 : 590)
+        .frame(width: 640, height: provider == .local ? 390 : 690)
         .background(ScribeTheme.paper)
+    }
+
+    @ViewBuilder
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                fieldLabel("Model")
+                Spacer()
+                if !availableModels.isEmpty {
+                    Button("Refresh") { loadModels() }
+                        .buttonStyle(.plain)
+                        .font(ScribeTheme.sans(10, weight: .medium))
+                        .foregroundStyle(ScribeTheme.coral)
+                        .disabled(isLoadingModels)
+                        .scribePointer()
+                }
+            }
+
+            if isLoadingModels {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Loading models available to this account…")
+                        .font(ScribeTheme.sans(11))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+                .frame(height: 32)
+            } else if !availableModels.isEmpty && !usesManualModelEntry {
+                if availableModels.count > 8 {
+                    TextField("Search \(availableModels.count) available models", text: $modelSearch)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                if filteredModels.isEmpty {
+                    Text("No models match “\(modelSearch)”. Clear the search to see every available model.")
+                        .font(ScribeTheme.sans(10))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+
+                Menu {
+                    ForEach(filteredModels) { option in
+                        Button {
+                            modelName = option.id
+                        } label: {
+                            if option.id == modelName {
+                                Label(optionMenuTitle(option), systemImage: "checkmark")
+                            } else {
+                                Text(optionMenuTitle(option))
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selectedModel?.title ?? "Choose a model")
+                                .font(ScribeTheme.sans(12, weight: .medium))
+                                .foregroundStyle(ScribeTheme.ink)
+                            if let selectedModel {
+                                Text(selectedModel.detail)
+                                    .font(ScribeTheme.sans(9))
+                                    .foregroundStyle(ScribeTheme.mutedInk)
+                                    .lineLimit(1)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(ScribeTheme.faintInk)
+                    }
+                    .padding(.horizontal, 12)
+                    .frame(height: 48)
+                    .background(ScribeTheme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .stroke(ScribeTheme.divider, lineWidth: 1)
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .disabled(filteredModels.isEmpty)
+                .scribePointer()
+
+                Button("Enter a model ID manually") {
+                    usesManualModelEntry = true
+                    modelSearch = ""
+                }
+                .buttonStyle(.plain)
+                .font(ScribeTheme.sans(10))
+                .foregroundStyle(ScribeTheme.mutedInk)
+                .scribePointer()
+            } else if usesManualModelEntry {
+                TextField("Model ID", text: $modelName)
+                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Text("Use this for a private or provider-specific model not returned by the API.")
+                        .font(ScribeTheme.sans(9))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                    Spacer()
+                    Button("Use model list") {
+                        usesManualModelEntry = false
+                    }
+                    .buttonStyle(.plain)
+                    .font(ScribeTheme.sans(10, weight: .medium))
+                    .foregroundStyle(ScribeTheme.coral)
+                    .disabled(availableModels.isEmpty)
+                    .scribePointer()
+                }
+            } else {
+                HStack(spacing: 10) {
+                    Button("Load available models") { loadModels() }
+                        .buttonStyle(ScribeSecondaryButtonStyle())
+                        .disabled(provider.needsAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text(provider.needsAPIKey && apiKey.isEmpty
+                         ? "Enter your API key first."
+                         : "Scribe will ask \(provider.title) which models this account can use.")
+                        .font(ScribeTheme.sans(10))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+
+                Button("Enter a model ID manually") {
+                    usesManualModelEntry = true
+                }
+                .buttonStyle(.plain)
+                .font(ScribeTheme.sans(10))
+                .foregroundStyle(ScribeTheme.mutedInk)
+                .scribePointer()
+            }
+
+            if let modelLoadError {
+                Label(modelLoadError, systemImage: "exclamationmark.triangle")
+                    .font(ScribeTheme.sans(10))
+                    .foregroundStyle(ScribeTheme.coral)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var filteredModels: [ScribeAIModelOption] {
+        let query = modelSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return availableModels }
+        return availableModels.filter {
+            $0.title.localizedCaseInsensitiveContains(query)
+                || $0.id.localizedCaseInsensitiveContains(query)
+                || $0.detail.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var selectedModel: ScribeAIModelOption? {
+        availableModels.first { $0.id == modelName }
+    }
+
+    private func optionMenuTitle(_ option: ScribeAIModelOption) -> String {
+        option.title + (option.isRecommended ? " — Recommended" : "")
+    }
+
+    private func loadModels() {
+        let requestID = UUID()
+        modelRequestID = requestID
+        let requestedProvider = provider
+        let requestedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requestedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        isLoadingModels = true
+        modelLoadError = nil
+        Task {
+            do {
+                let options = try await ScribeAIModelCatalog.fetch(
+                    provider: requestedProvider,
+                    baseURL: requestedBaseURL,
+                    apiKey: requestedAPIKey
+                )
+                guard modelRequestID == requestID else { return }
+                availableModels = options
+                if !options.contains(where: { $0.id == modelName }) {
+                    modelName = ScribeAIModelCatalog.preferredModel(
+                        from: options,
+                        provider: requestedProvider
+                    )?.id ?? ""
+                }
+                usesManualModelEntry = false
+            } catch {
+                guard modelRequestID == requestID else { return }
+                availableModels = []
+                modelLoadError = error.localizedDescription
+            }
+            guard modelRequestID == requestID else { return }
+            isLoadingModels = false
+        }
     }
 
     private func close() {
