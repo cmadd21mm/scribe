@@ -4,6 +4,64 @@ import Testing
 @testable import Scribe
 
 struct IntelligenceTests {
+    @Test("Venice model catalog keeps text models and friendly names")
+    func parsesVeniceModels() throws {
+        let data = Data(#"""
+        {"data":[
+          {"id":"venice-large","type":"text","model_spec":{"name":"Venice Large","description":"Best quality","traits":["default"]}},
+          {"id":"venice-image","type":"image","model_spec":{"name":"Venice Image"}}
+        ]}
+        """#.utf8)
+        let models = try ScribeAIModelCatalog.parse(data: data, provider: .venice)
+        #expect(models.map(\.id) == ["venice-large"])
+        #expect(models.first?.title == "Venice Large")
+        #expect(models.first?.isRecommended == true)
+    }
+
+    @Test("Claude model catalog uses provider display names")
+    func parsesClaudeModels() throws {
+        let data = Data(#"""
+        {"data":[{"id":"claude-example-20260818","display_name":"Claude Example"}]}
+        """#.utf8)
+        let models = try ScribeAIModelCatalog.parse(data: data, provider: .claude)
+        #expect(models.first?.id == "claude-example-20260818")
+        #expect(models.first?.title == "Claude Example")
+    }
+
+    @Test("xAI model catalog reads language-model aliases")
+    func parsesXAIModels() throws {
+        let data = Data(#"""
+        {"models":[{"id":"grok-example","aliases":["grok-latest"]}]}
+        """#.utf8)
+        let models = try ScribeAIModelCatalog.parse(data: data, provider: .xAI)
+        #expect(models.first?.id == "grok-example")
+        #expect(models.first?.detail.contains("grok-latest") == true)
+    }
+
+    @Test("OpenAI model catalog hides models that cannot answer chat questions")
+    func filtersOpenAIModels() throws {
+        let data = Data(#"""
+        {"data":[
+          {"id":"gpt-example"},
+          {"id":"davinci-002"},
+          {"id":"text-embedding-example"},
+          {"id":"image-example"},
+          {"id":"whisper-example"}
+        ]}
+        """#.utf8)
+        let models = try ScribeAIModelCatalog.parse(data: data, provider: .openAI)
+        #expect(models.map(\.id) == ["gpt-example"])
+    }
+
+    @Test("OpenAI model catalog prefers a current general model when available")
+    func prefersGeneralOpenAIModel() throws {
+        let options = [
+            ScribeAIModelOption(id: "gpt-4.1-mini", title: "gpt-4.1-mini", detail: "OpenAI", isRecommended: false),
+            ScribeAIModelOption(id: "gpt-5", title: "gpt-5", detail: "OpenAI", isRecommended: false),
+        ]
+        #expect(ScribeAIModelCatalog.preferredModel(from: options, provider: .openAI)?.id == "gpt-5")
+    }
+
     @Test("Local Ask Scribe returns timestamped evidence without a provider")
     func localAnswerHasCitation() async throws {
         let meeting = MeetingRecord.demoMeetings().first!

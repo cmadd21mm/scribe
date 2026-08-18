@@ -18,6 +18,11 @@ ln -s /Applications "$STAGING_DIR/Applications"
 hdiutil create -volname "Scribe" -srcfolder "$STAGING_DIR" -ov -format UDZO "$DMG_PATH"
 rm -rf "$STAGING_DIR"
 
+SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
+if [ "$SIGNING_IDENTITY" != "-" ]; then
+    codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+fi
+
 if [ -n "${APPLE_NOTARY_PROFILE:-}" ]; then
     xcrun notarytool submit "$DMG_PATH" --keychain-profile "$APPLE_NOTARY_PROFILE" --wait
     xcrun stapler staple "$DMG_PATH"

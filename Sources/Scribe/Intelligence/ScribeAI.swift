@@ -44,6 +44,13 @@ struct ScribeAISettings: Equatable, Sendable {
     var redactSensitive: Bool
 }
 
+struct ScribeAIModelOption: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let detail: String
+    let isRecommended: Bool
+}
+
 struct ScribeChatMessage: Identifiable, Equatable, Sendable {
     enum Role: Sendable { case user, assistant }
     let id = UUID()
@@ -103,6 +110,148 @@ enum ScribeAIError: LocalizedError {
         case .invalidResponse: return "The AI provider returned an unreadable response."
         case .requestFailed(let message): return message
         }
+    }
+}
+
+enum ScribeAIModelCatalog {
+    static func fetch(
+        provider: ScribeAIProvider,
+        baseURL: String,
+        apiKey: String,
+        session: URLSession = .shared
+    ) async throws -> [ScribeAIModelOption] {
+        guard provider != .local else { return [] }
+        let resolvedBaseURL = baseURL.isEmpty ? provider.defaultBaseURL : baseURL
+        let trimmedBaseURL = resolvedBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let suffix: String
+        switch provider {
+        case .venice:
+            suffix = "/models?type=text"
+        case .claude:
+            suffix = "/models?limit=1000"
+        case .xAI:
+            suffix = "/language-models"
+        case .openAI, .custom:
+            suffix = "/models"
+        case .local:
+            return []
+        }
+        guard let url = URL(string: trimmedBaseURL + suffix) else {
+            throw ScribeAIError.invalidEndpoint
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if provider == .claude {
+            request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        } else if !apiKey.isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ScribeAIError.invalidResponse
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw ScribeAIError.requestFailed(
+                providerErrorMessage(from: data)
+                    ?? "\(provider.title) returned HTTP \(http.statusCode) while listing models."
+            )
+        }
+        let options = try parse(data: data, provider: provider)
+        guard !options.isEmpty else {
+            throw ScribeAIError.requestFailed("No compatible text models were returned for this account.")
+        }
+        return options
+    }
+
+    static func parse(data: Data, provider: ScribeAIProvider) throws -> [ScribeAIModelOption] {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw ScribeAIError.invalidResponse
+        }
+        let rawModels: [[String: Any]]
+        if provider == .xAI {
+            rawModels = json["models"] as? [[String: Any]] ?? []
+        } else {
+            rawModels = json["data"] as? [[String: Any]] ?? []
+        }
+
+        let parsed = rawModels.compactMap { model -> ScribeAIModelOption? in
+            guard let id = model["id"] as? String, !id.isEmpty else { return nil }
+            if provider == .venice,
+               let type = model["type"] as? String,
+               type != "text" { return nil }
+            if provider == .openAI && !isLikelyTextModel(id) { return nil }
+
+            let spec = model["model_spec"] as? [String: Any]
+            let displayName = (spec?["name"] as? String)
+                ?? (model["display_name"] as? String)
+                ?? id
+            let description = spec?["description"] as? String
+            let aliases = model["aliases"] as? [String]
+            let detail: String
+            if let description, !description.isEmpty {
+                detail = description
+            } else if let aliases, !aliases.isEmpty {
+                detail = "Also available as \(aliases.prefix(3).joined(separator: ", "))"
+            } else if displayName != id {
+                detail = id
+            } else {
+                detail = provider.title
+            }
+            let traits = spec?["traits"] as? [String] ?? []
+            let recommended = traits.contains { trait in
+                let normalized = trait.lowercased()
+                return normalized == "default" || normalized == "recommended"
+            }
+            return ScribeAIModelOption(
+                id: id,
+                title: displayName,
+                detail: detail,
+                isRecommended: recommended
+            )
+        }
+
+        var seen = Set<String>()
+        let unique = parsed.filter { seen.insert($0.id).inserted }
+        return unique.filter(\.isRecommended) + unique.filter { !$0.isRecommended }
+    }
+
+    static func preferredModel(
+        from options: [ScribeAIModelOption],
+        provider: ScribeAIProvider
+    ) -> ScribeAIModelOption? {
+        if let recommended = options.first(where: \.isRecommended) { return recommended }
+        if provider == .openAI {
+            let preferredIDs = ["gpt-5.2", "gpt-5.1", "gpt-5", "gpt-4.1"]
+            for id in preferredIDs {
+                if let match = options.first(where: { $0.id == id }) { return match }
+            }
+        }
+        return options.first
+    }
+
+    private static func isLikelyTextModel(_ id: String) -> Bool {
+        let value = id.lowercased()
+        let unsupportedMarkers = [
+            "embedding", "moderation", "whisper", "transcribe", "tts", "dall-e",
+            "image", "realtime", "audio", "computer-use", "search-preview"
+        ]
+        let supportedPrefixes = ["gpt-", "chatgpt-", "o1", "o3", "o4"]
+        return supportedPrefixes.contains { value.hasPrefix($0) }
+            && !unsupportedMarkers.contains { value.contains($0) }
+    }
+
+    private static func providerErrorMessage(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        if let error = json["error"] as? [String: Any] {
+            return (error["message"] as? String) ?? (error["type"] as? String)
+        }
+        return json["message"] as? String
     }
 }
 
