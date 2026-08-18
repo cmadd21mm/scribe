@@ -224,8 +224,11 @@ enum MeetingLibraryReader {
             encoding: .utf8
         )) ?? ""
         let sections = parseSections(noteText)
+        let isLegacyBuiltInNote = noteText.localizedCaseInsensitiveContains(
+            "Generated locally with Scribe built-in summary"
+        )
         let completed = readActionState(directory)
-        let actions = parseList(sections["action items"] ?? "")
+        let actions = (isLegacyBuiltInNote ? [] : parseList(sections["action items"] ?? ""))
             .enumerated()
             .map { index, item in
                 MeetingActionItem(id: index, text: cleanAction(item), isComplete: completed.contains(index))
@@ -256,10 +259,12 @@ enum MeetingLibraryReader {
             capturedSystemAudio: metadata.files?["system"].map {
                 FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
             } ?? false,
-            summary: cleanSection(sections["summary"] ?? fallbackSummary(transcript: transcript)),
-            decisions: parseList(sections["decisions"] ?? ""),
+            summary: isLegacyBuiltInNote
+                ? ""
+                : cleanSection(sections["summary"] ?? fallbackSummary(transcript: transcript)),
+            decisions: isLegacyBuiltInNote ? [] : parseList(sections["decisions"] ?? ""),
             actionItems: actions,
-            openQuestions: parseList(sections["open questions"] ?? ""),
+            openQuestions: isLegacyBuiltInNote ? [] : parseList(sections["open questions"] ?? ""),
             transcript: transcript,
             userNotes: userNotes,
             speakerNames: speakerNames,
@@ -640,7 +645,11 @@ final class ScribeAppModel: ObservableObject {
     }
 
     var configuredSummaryAIName: String? {
-        guard aiSettings.provider != .local, !aiSettings.model.isEmpty else { return nil }
+        if aiSettings.provider == .local {
+            guard case .available(let summarizer) = Config.localSummarizer() else { return nil }
+            return summarizer.backendName
+        }
+        guard !aiSettings.model.isEmpty else { return nil }
         if aiSettings.provider == .venice {
             return ScribeAIModelCatalog.veniceFallbackModels
                 .first(where: { $0.id == aiSettings.model })?.title
@@ -739,6 +748,7 @@ final class ScribeAppModel: ObservableObject {
         let shouldRefresh = meetings[index].hasTranscript
             && meetings[index].state != "recording"
             && !meetings[index].isDemo
+            && configuredSummaryAIName != nil
         do {
             try MeetingLibraryReader.saveUserNotes(text, for: meetings[index])
         } catch {
@@ -837,8 +847,8 @@ final class ScribeAppModel: ObservableObject {
         else { return }
         let transcriptURL = meeting.directory.appendingPathComponent("transcript.md")
         let settings = aiSettings
-        if settings.provider != .local && settings.model.isEmpty {
-            alertMessage = "Choose an AI model in Settings before generating an AI summary."
+        guard configuredSummaryAIName != nil else {
+            showAISettings = true
             return
         }
         regeneratingMeetingID = meeting.id

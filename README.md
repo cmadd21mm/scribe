@@ -26,8 +26,9 @@ actions, and your own notes together in plain files.
   and people, correct speaker names, and draft recap emails, status updates,
   agendas, or task lists without sending anything automatically.
 - **Notes that fit the moment.** Choose concise, balanced, detailed, or
-  action-focused summaries. Your quick notes guide the result, and saving an
-  edit refreshes the summary. The built-in local fallback works with no setup.
+  action-focused summaries. Your quick notes guide the result. Scribe offers a
+  summary only after you connect a capable local or remote model—never a
+  sentence-stitching fallback presented as analysis.
 - **Local means local.** No account, bot, telemetry, cloud transcript, hidden
   upload, subscription, or proprietary database.
 - **Work and life fit together.** Product reviews, client calls, appointments,
@@ -100,10 +101,10 @@ explicitly from Terminal:
 scribe models download-transcription --model parakeet-v2
 ```
 
-Normal recording and transcription make no network requests. Scribe always
-creates a private structured note with a summary, decisions, action items, and
-open questions. An optional locally installed `llama.cpp` executable and GGUF
-model can make those notes richer; the built-in fallback requires no setup.
+Normal recording and transcription make no network requests. The transcript is
+available without any AI connection. Summaries, decisions, action items, and
+open questions remain unavailable until you connect an optional locally
+installed `llama.cpp` model or explicitly configure a remote provider.
 
 Ask Scribe also works locally with timestamped retrieval. Optional remote AI
 connections use an API key stored in the Mac Keychain. Scribe can fetch the

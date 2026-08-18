@@ -166,18 +166,21 @@ struct ScribeSettingsView: View {
                                 .foregroundStyle(ScribeTheme.ink)
                                 .frame(width: 28, height: 24)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Meeting notes are always ready")
+                                Text("Reliable meeting summaries")
                                     .font(ScribeTheme.sans(13, weight: .medium))
                                     .foregroundStyle(ScribeTheme.ink)
-                                Text("Scribe creates private summaries, decisions, action items, and questions without an account or model setup. A configured local llama.cpp model automatically improves the result.")
+                                Text(model.configuredSummaryAIName.map {
+                                    "Connected to \($0). Summaries are generated only when you explicitly request them."
+                                } ?? "Transcription works locally on its own. Connect a separate AI or capable local model before Scribe offers summaries, decisions, or action items.")
                                     .font(ScribeTheme.sans(10))
                                     .foregroundStyle(ScribeTheme.faintInk)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer()
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(ScribeTheme.coral)
-                                .accessibilityLabel("Ready")
+                            Button(model.configuredSummaryAIName == nil ? "Set up…" : "Change…") {
+                                model.showAISettings = true
+                            }
+                            .buttonStyle(ScribeSecondaryButtonStyle())
                         }
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "slider.horizontal.3")
@@ -212,12 +215,12 @@ struct ScribeSettingsView: View {
                                 .foregroundStyle(ScribeTheme.ink)
                                 .frame(width: 28, height: 24)
                             VStack(alignment: .leading, spacing: 3) {
-                                Text("Ask Scribe")
+                                Text("Meeting AI")
                                     .font(ScribeTheme.sans(13, weight: .medium))
                                     .foregroundStyle(ScribeTheme.ink)
                                 Text(model.aiSettings.provider == .local
-                                     ? "On-device search with timestamp citations. No account or upload."
-                                     : "Connected to \(model.aiSettings.provider.title). Context is shared only when you ask a question.")
+                                     ? "Connect a model for reliable summaries. Transcript search remains available locally."
+                                     : "Connected to \(model.aiSettings.provider.title). Context is shared only when you request a summary or ask a question.")
                                     .font(ScribeTheme.sans(10))
                                     .foregroundStyle(ScribeTheme.faintInk)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -496,7 +499,7 @@ struct ScribeAISettingsView: View {
                     Text("Meeting intelligence")
                         .font(ScribeTheme.serif(28, weight: .semibold))
                         .foregroundStyle(ScribeTheme.ink)
-                    Text("Choose how Scribe answers questions about your meetings.")
+                    Text("Choose how Scribe creates summaries and answers questions about meetings.")
                         .font(ScribeTheme.sans(12))
                         .foregroundStyle(ScribeTheme.mutedInk)
                 }
@@ -537,7 +540,7 @@ struct ScribeAISettingsView: View {
 
                 if provider == .local {
                     Label(
-                        "Scribe searches your local transcripts and returns the most relevant timestamped moments. It works offline and sends nothing anywhere.",
+                        "Scribe can search local transcripts without a model, but it will not label that search as a summary. Connect a capable local or remote model for meeting analysis.",
                         systemImage: "internaldrive"
                     )
                     .font(ScribeTheme.sans(11))
@@ -595,7 +598,7 @@ struct ScribeAISettingsView: View {
                         .scribePointer()
 
                     Label(
-                        "Your ChatGPT, Claude, Grok, or Venice subscription may not include API use. Scribe stores the key in Keychain and sends meeting context only after you press Ask.",
+                        "Your ChatGPT, Claude, Grok, or Venice subscription may not include API use. Scribe stores the key in Keychain and sends meeting context only after you request a summary or press Ask.",
                         systemImage: "hand.raised"
                     )
                     .font(ScribeTheme.sans(10))

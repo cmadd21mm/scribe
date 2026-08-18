@@ -46,6 +46,41 @@ struct MeetingLibraryTests {
         #expect(meeting.searchableText.contains("jordan"))
     }
 
+    @Test("Legacy built-in summaries and guesses are hidden")
+    func hidesLegacyBuiltInSummary() throws {
+        let meeting = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-legacy-summary-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: meeting, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: meeting) }
+
+        try Data(#"{"state":"complete","title":"Planning"}"#.utf8)
+            .write(to: meeting.appendingPathComponent("meta.json"))
+        try Data("""
+        # Planning
+
+        ## Summary
+
+        A sentence collage that should not be shown.
+
+        ## Decisions
+
+        - A guessed decision.
+
+        ## Action items
+
+        - [ ] A guessed task.
+
+        _Generated locally with Scribe built-in summary. See [transcript](transcript.md)._
+        """.utf8).write(to: meeting.appendingPathComponent("note.md"))
+        try Data(#"{"segments":[{"speaker":"me","start_ms":0,"text":"Hello"}]}"#.utf8)
+            .write(to: meeting.appendingPathComponent("transcript.json"))
+
+        let result = try #require(MeetingLibraryReader.read(directory: meeting))
+        #expect(result.summary.isEmpty)
+        #expect(result.decisions.isEmpty)
+        #expect(result.actionItems.isEmpty)
+    }
+
     @Test("Renaming a meeting updates its folder, metadata, and Markdown titles")
     func renamesMeetingEverywhere() throws {
         let root = FileManager.default.temporaryDirectory
