@@ -4,6 +4,19 @@ import Testing
 @testable import Scribe
 
 struct NotePipelineTests {
+    private struct FixedRemoteSummarizer: MeetingSummarizer {
+        let backendName = "Venice AI · kimi-k3"
+
+        func summarize(_ request: SummarizationRequest) async throws -> StructuredMeetingNote {
+            StructuredMeetingNote(
+                summary: "The team approved the launch plan.",
+                decisions: ["Launch on Friday."],
+                actionItems: [.init(task: "Send the final invite.", owner: "Priya", due: "Thursday")],
+                openQuestions: []
+            )
+        }
+    }
+
     @Test("Local model JSON is parsed even when surrounded by chatter")
     func parsesModelOutput() throws {
         let output = """
@@ -55,8 +68,8 @@ struct NotePipelineTests {
         #expect(markdown.contains("did not make a network call"))
     }
 
-    @Test("Built-in notes find decisions, owners, due dates, and questions without a model")
-    func builtInNotesRequireNoSetup() async throws {
+    @Test("Built-in notes never guess decisions or assignments without a model")
+    func builtInNotesStayConservative() async throws {
         let transcript = """
         **[00:01] Priya:** Let's ship the smaller beta.
         **[00:08] Jordan:** I'll share the onboarding prototype by Thursday.
@@ -69,9 +82,31 @@ struct NotePipelineTests {
             userNotes: "Make sure Jordan's prototype is included in the follow-up.",
             style: .balanced
         ))
-        #expect(note.decisions == ["Let's ship the smaller beta."])
-        #expect(note.actionItems.first?.owner == "Jordan")
-        #expect(note.actionItems.first?.due?.lowercased() == "by thursday")
-        #expect(note.openQuestions == ["Who owns the support review?"])
+        #expect(note.summary.contains("transcript is ready"))
+        #expect(note.decisions.isEmpty)
+        #expect(note.actionItems.isEmpty)
+        #expect(note.openQuestions.isEmpty)
+    }
+
+    @Test("An explicit remote summarizer is rendered without claiming local generation")
+    func explicitRemoteSummary() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-remote-note-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(#"{"title":"Launch review","attendees":["Priya"]}"#.utf8)
+            .write(to: dir.appendingPathComponent("meta.json"))
+
+        try await NotePipeline.generate(
+            sessionDir: dir,
+            transcriptMarkdown: "**[00:01] Priya:** We approved the Friday launch.",
+            summarizer: FixedRemoteSummarizer(),
+            generatedLocally: false
+        )
+
+        let markdown = try String(contentsOf: dir.appendingPathComponent("note.md"), encoding: .utf8)
+        #expect(markdown.contains("The team approved the launch plan."))
+        #expect(markdown.contains("Generated with Venice AI · kimi-k3"))
+        #expect(!markdown.contains("Generated locally with Venice"))
     }
 }

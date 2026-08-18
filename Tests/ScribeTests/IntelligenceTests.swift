@@ -4,6 +4,14 @@ import Testing
 @testable import Scribe
 
 struct IntelligenceTests {
+    @Test("Kimi K3 is available immediately even before Venice catalog refresh")
+    func kimiK3Fallback() {
+        let models = ScribeAIModelCatalog.veniceFallbackModels
+        #expect(models.first?.id == "kimi-k3-fast-api")
+        #expect(models.first?.isRecommended == true)
+        #expect(models.contains { $0.id == "kimi-k3" })
+    }
+
     @Test("Venice model discovery uses the fast public catalog with a short deadline")
     func veniceModelRequest() throws {
         let request = try ScribeAIModelCatalog.modelListRequest(

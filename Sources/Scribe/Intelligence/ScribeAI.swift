@@ -113,16 +113,71 @@ enum ScribeAIError: LocalizedError {
     }
 }
 
+private final class ScribeNetworkRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+
+    func claimCompletion() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !finished else { return false }
+        finished = true
+        return true
+    }
+}
+
+private enum ScribeNetworkDeadline {
+    static func data(
+        for request: URLRequest,
+        session: URLSession,
+        seconds: UInt64
+    ) async throws -> (Data, URLResponse) {
+        try await withCheckedThrowingContinuation { continuation in
+            let race = ScribeNetworkRace()
+            let task = session.dataTask(with: request) { data, response, error in
+                guard race.claimCompletion() else { return }
+                if let error {
+                    continuation.resume(throwing: error)
+                } else if let data, let response {
+                    continuation.resume(returning: (data, response))
+                } else {
+                    continuation.resume(throwing: ScribeAIError.invalidResponse)
+                }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + .seconds(Int(seconds))
+            ) {
+                guard race.claimCompletion() else { return }
+                task.cancel()
+                continuation.resume(throwing: URLError(.timedOut))
+            }
+            task.resume()
+        }
+    }
+}
+
 enum ScribeAIModelCatalog {
     /// A small last-resort Venice list verified against the public catalog.
     /// It keeps setup usable during a transient catalog outage; Refresh still
     /// asks Venice for the complete current list.
     static let veniceFallbackModels: [ScribeAIModelOption] = [
         .init(
+            id: "kimi-k3-fast-api",
+            title: "Kimi K3 Fast",
+            detail: "Recommended Kimi K3 endpoint for responsive meeting analysis",
+            isRecommended: true
+        ),
+        .init(
+            id: "kimi-k3",
+            title: "Kimi K3",
+            detail: "Standard endpoint; may take substantially longer",
+            isRecommended: false
+        ),
+        .init(
             id: "zai-org-glm-4.7",
             title: "GLM 4.7",
             detail: "Venice default general-purpose model",
-            isRecommended: true
+            isRecommended: false
         ),
         .init(
             id: "venice-uncensored-1-2",
@@ -152,7 +207,11 @@ enum ScribeAIModelCatalog {
             apiKey: apiKey,
             authenticateVenice: false
         )
-        var (data, response) = try await session.data(for: request)
+        var (data, response) = try await ScribeNetworkDeadline.data(
+            for: request,
+            session: session,
+            seconds: 8
+        )
         if provider == .venice,
            let http = response as? HTTPURLResponse,
            [401, 403].contains(http.statusCode),
@@ -163,7 +222,11 @@ enum ScribeAIModelCatalog {
                 apiKey: apiKey,
                 authenticateVenice: true
             )
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await ScribeNetworkDeadline.data(
+                for: request,
+                session: session,
+                seconds: 8
+            )
         }
         return try models(from: data, response: response, provider: provider)
     }
@@ -325,6 +388,174 @@ enum ScribeAIModelCatalog {
     }
 }
 
+struct ScribeRemoteMeetingSummarizer: MeetingSummarizer {
+    let settings: ScribeAISettings
+
+    var backendName: String { "\(settings.provider.title) · \(settings.model)" }
+
+    func summarize(_ request: SummarizationRequest) async throws -> StructuredMeetingNote {
+        let transcript = settings.redactSensitive
+            ? ScribeMeetingAssistant.redactSensitiveData(request.transcriptMarkdown)
+            : request.transcriptMarkdown
+        let userNotes = settings.redactSensitive
+            ? ScribeMeetingAssistant.redactSensitiveData(request.userNotes)
+            : request.userNotes
+        let prompt = """
+        Turn this meeting transcript into factual, useful notes. Use only the supplied material.
+        Return exactly one JSON object without Markdown fences using this schema:
+        {"summary":"string","decisions":["string"],"actionItems":[{"task":"string","owner":"string or null","due":"string or null"}],"openQuestions":["string"]}
+
+        Requirements:
+        - Write a coherent summary of the actual discussion and outcome, not a collage of transcript sentences.
+        - Include only decisions that participants clearly made.
+        - Include only genuine commitments or assigned next steps as action items.
+        - Never invent an owner or due date. Use null when either is not explicit.
+        - Preserve important nuance and disagreement.
+        - Empty arrays are correct when the transcript does not support an item.
+        - Note style: \(request.style.title). \(request.style.guidance)
+
+        Meeting: \(request.title)
+        Attendees: \(request.attendees.isEmpty ? "(not provided)" : request.attendees.joined(separator: ", "))
+
+        User notes:
+        \(userNotes.isEmpty ? "(none)" : userNotes)
+
+        Transcript:
+        \(transcript)
+        """
+        let output = try await ScribeRemoteAIClient.complete(
+            prompt: prompt,
+            settings: settings,
+            maxTokens: 1_200,
+            structuredMeetingNote: true
+        )
+        return try SummaryOutputParser.parse(output)
+    }
+}
+
+enum ScribeRemoteAIClient {
+    static func complete(
+        prompt: String,
+        settings: ScribeAISettings,
+        maxTokens: Int,
+        structuredMeetingNote: Bool = false
+    ) async throws -> String {
+        guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ScribeAIError.missingModel
+        }
+        let key = ScribeKeychain.apiKey(provider: settings.provider)
+        if settings.provider.needsAPIKey && key.isEmpty { throw ScribeAIError.missingAPIKey }
+        let base = settings.baseURL.isEmpty ? settings.provider.defaultBaseURL : settings.baseURL
+        let suffix = settings.provider == .claude ? "/messages" : "/chat/completions"
+        guard let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + suffix) else {
+            throw ScribeAIError.invalidEndpoint
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if settings.provider == .claude {
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "model": settings.model,
+                "max_tokens": maxTokens,
+                "messages": [["role": "user", "content": prompt]],
+            ])
+        } else {
+            if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+            var body: [String: Any] = [
+                "model": settings.model,
+                "max_completion_tokens": maxTokens,
+                "messages": [["role": "user", "content": prompt]],
+            ]
+            if structuredMeetingNote && settings.provider == .venice {
+                body["response_format"] = meetingNoteResponseFormat
+                body["venice_parameters"] = [
+                    "disable_thinking": true,
+                    "enable_web_search": "off",
+                    "include_venice_system_prompt": false,
+                ]
+            }
+            if settings.provider == .openAI { body["store"] = false }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 120
+        configuration.timeoutIntervalForResource = 120
+        let (data, response) = try await ScribeNetworkDeadline.data(
+            for: request,
+            session: URLSession(configuration: configuration),
+            seconds: 90
+        )
+        guard let http = response as? HTTPURLResponse else { throw ScribeAIError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
+                .flatMap { json in
+                    if let error = json["error"] as? [String: Any] {
+                        return (error["message"] as? String) ?? (error["type"] as? String)
+                    }
+                    return json["message"] as? String
+                }
+                ?? String(data: data, encoding: .utf8).map { String($0.prefix(500)) }
+                ?? "\(settings.provider.title) returned HTTP \(http.statusCode)."
+            throw ScribeAIError.requestFailed(message)
+        }
+
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        if settings.provider == .claude,
+           let content = json?["content"] as? [[String: Any]],
+           let text = content.first?["text"] as? String,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+        if let choices = json?["choices"] as? [[String: Any]],
+           let message = choices.first?["message"] as? [String: Any],
+           let text = message["content"] as? String,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+        if structuredMeetingNote,
+           let choices = json?["choices"] as? [[String: Any]],
+           let message = choices.first?["message"] as? [String: Any],
+           let reasoning = message["reasoning_content"] as? String,
+           reasoning.contains("{") { return reasoning }
+        throw ScribeAIError.invalidResponse
+    }
+
+    private static var meetingNoteResponseFormat: [String: Any] {
+        [
+            "type": "json_schema",
+            "json_schema": [
+                "name": "scribe_meeting_note",
+                "strict": true,
+                "schema": [
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["summary", "decisions", "actionItems", "openQuestions"],
+                    "properties": [
+                        "summary": ["type": "string"],
+                        "decisions": ["type": "array", "items": ["type": "string"]],
+                        "actionItems": [
+                            "type": "array",
+                            "items": [
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["task", "owner", "due"],
+                                "properties": [
+                                    "task": ["type": "string"],
+                                    "owner": ["type": ["string", "null"]],
+                                    "due": ["type": ["string", "null"]],
+                                ],
+                            ],
+                        ],
+                        "openQuestions": ["type": "array", "items": ["type": "string"]],
+                    ],
+                ],
+            ],
+        ]
+    }
+}
+
 enum ScribeMeetingAssistant {
     static func answer(
         question: String,
@@ -380,16 +611,6 @@ enum ScribeMeetingAssistant {
         context: String,
         settings: ScribeAISettings
     ) async throws -> String {
-        guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw ScribeAIError.missingModel
-        }
-        let key = ScribeKeychain.apiKey(provider: settings.provider)
-        if settings.provider.needsAPIKey && key.isEmpty { throw ScribeAIError.missingAPIKey }
-        let base = settings.baseURL.isEmpty ? settings.provider.defaultBaseURL : settings.baseURL
-        let suffix = settings.provider == .claude ? "/messages" : "/chat/completions"
-        guard let url = URL(string: base.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + suffix) else {
-            throw ScribeAIError.invalidEndpoint
-        }
         let prompt = """
         Answer using only the supplied Scribe meeting context. Be concise and useful. Cite transcript evidence with its exact [MM:SS] timestamp. If the context does not support an answer, say so.
 
@@ -399,46 +620,14 @@ enum ScribeMeetingAssistant {
         MEETING CONTEXT
         \(context)
         """
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if settings.provider == .claude {
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            request.httpBody = try JSONSerialization.data(withJSONObject: [
-                "model": settings.model,
-                "max_tokens": 1_200,
-                "messages": [["role": "user", "content": prompt]],
-            ])
-        } else {
-            if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-            var body: [String: Any] = [
-                "model": settings.model,
-                "messages": [["role": "user", "content": prompt]],
-                "temperature": 0.2,
-            ]
-            if settings.provider == .openAI { body["store"] = false }
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        }
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw ScribeAIError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])
-                .flatMap { ($0["error"] as? [String: Any])?["message"] as? String }
-                ?? "The provider returned HTTP \(http.statusCode)."
-            throw ScribeAIError.requestFailed(message)
-        }
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        if settings.provider == .claude,
-           let content = json?["content"] as? [[String: Any]],
-           let text = content.first?["text"] as? String { return text }
-        if let choices = json?["choices"] as? [[String: Any]],
-           let message = choices.first?["message"] as? [String: Any],
-           let text = message["content"] as? String { return text }
-        throw ScribeAIError.invalidResponse
+        return try await ScribeRemoteAIClient.complete(
+            prompt: prompt,
+            settings: settings,
+            maxTokens: 1_200
+        )
     }
 
-    private static func redactSensitiveData(_ value: String) -> String {
+    static func redactSensitiveData(_ value: String) -> String {
         var output = value
         let patterns = [
             #"[A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#,

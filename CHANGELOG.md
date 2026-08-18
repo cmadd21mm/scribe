@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.7
+
+- Added Kimi K3 and Kimi K3 Fast as immediately available Venice choices, so
+  selecting them never depends on the remote model catalog loading first.
+- Connected explicit Generate summary and Regenerate summary actions to the
+  configured AI provider and model, while keeping automatic processing local.
+- Replaced the sentence-stitching fallback for user-requested AI summaries
+  with structured provider analysis that rejects invented decisions, owners,
+  due dates, and action items.
+- Reused the same hardened remote request path for Ask Scribe and summaries,
+  with Keychain credentials, optional contact redaction, and clear errors.
+
 ## 0.2.6
 
 - Added true microphone-only recording for in-person meetings; manual online

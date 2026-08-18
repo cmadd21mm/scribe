@@ -639,6 +639,16 @@ final class ScribeAppModel: ObservableObject {
         meetings.first { $0.id == selectedMeetingID }
     }
 
+    var configuredSummaryAIName: String? {
+        guard aiSettings.provider != .local, !aiSettings.model.isEmpty else { return nil }
+        if aiSettings.provider == .venice {
+            return ScribeAIModelCatalog.veniceFallbackModels
+                .first(where: { $0.id == aiSettings.model })?.title
+                ?? aiSettings.model
+        }
+        return "\(aiSettings.provider.title) · \(aiSettings.model)"
+    }
+
     func refresh(preservingSelection: Bool = true) {
         let previous = preservingSelection ? selectedMeetingID : nil
         meetings = demo ? MeetingRecord.demoMeetings() : MeetingLibraryReader.readAll(root: root)
@@ -826,13 +836,23 @@ final class ScribeAppModel: ObservableObject {
               regeneratingMeetingID == nil
         else { return }
         let transcriptURL = meeting.directory.appendingPathComponent("transcript.md")
+        let settings = aiSettings
+        if settings.provider != .local && settings.model.isEmpty {
+            alertMessage = "Choose an AI model in Settings before generating an AI summary."
+            return
+        }
         regeneratingMeetingID = meeting.id
         Task {
             do {
                 let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
+                let summarizer: (any MeetingSummarizer)? = settings.provider == .local
+                    ? nil
+                    : ScribeRemoteMeetingSummarizer(settings: settings)
                 try await NotePipeline.generate(
                     sessionDir: meeting.directory,
-                    transcriptMarkdown: transcript
+                    transcriptMarkdown: transcript,
+                    summarizer: summarizer,
+                    generatedLocally: settings.provider == .local
                 )
                 refresh()
             } catch {

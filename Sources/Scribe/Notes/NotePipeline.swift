@@ -4,7 +4,8 @@ enum NoteRenderer {
     static func render(
         context: MeetingContext,
         note: StructuredMeetingNote,
-        backendName: String
+        backendName: String,
+        generatedLocally: Bool = true
     ) -> String {
         let attendees = context.attendees.isEmpty
             ? "_No calendar attendees available_"
@@ -34,7 +35,7 @@ enum NoteRenderer {
 
         ---
 
-        _Generated locally with \(backendName). See [transcript](transcript.md)._
+        _\(generatedLocally ? "Generated locally with" : "Generated with") \(backendName). See [transcript](transcript.md)._
         """
     }
 
@@ -86,13 +87,38 @@ enum NoteRenderer {
 }
 
 enum NotePipeline {
-    static func generate(sessionDir: URL, transcriptMarkdown: String) async throws {
+    static func generate(
+        sessionDir: URL,
+        transcriptMarkdown: String,
+        summarizer explicitSummarizer: (any MeetingSummarizer)? = nil,
+        generatedLocally: Bool = true
+    ) async throws {
         let context = readContext(from: sessionDir)
         let userNotes = (try? String(
             contentsOf: sessionDir.appendingPathComponent("user-notes.md"),
             encoding: .utf8
         )) ?? ""
         let rendered: String
+        if let explicitSummarizer {
+            let note = try await explicitSummarizer.summarize(SummarizationRequest(
+                title: context.title,
+                attendees: context.attendees,
+                transcriptMarkdown: transcriptMarkdown,
+                userNotes: userNotes,
+                style: Config.noteStyle()
+            ))
+            rendered = NoteRenderer.render(
+                context: context,
+                note: note,
+                backendName: explicitSummarizer.backendName,
+                generatedLocally: generatedLocally
+            )
+            try Data(rendered.utf8).write(
+                to: sessionDir.appendingPathComponent("note.md"),
+                options: .atomic
+            )
+            return
+        }
         switch Config.localSummarizer() {
         case .available(let summarizer):
             do {
