@@ -75,7 +75,13 @@ struct ScribeSettingsView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer()
-                            Button("Check now…") { model.onCheckForUpdates?() }
+                            Button("Check now…") {
+                                model.showSettings = false
+                                dismiss()
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                    model.onCheckForUpdates?()
+                                }
+                            }
                                 .buttonStyle(ScribeSecondaryButtonStyle())
                         }
                     }
