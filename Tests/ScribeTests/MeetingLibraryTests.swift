@@ -26,13 +26,15 @@ struct MeetingLibraryTests {
         try Data("Remember the customer example.".utf8)
             .write(to: meeting.appendingPathComponent("user-notes.md"))
         try JSONEncoder().encode([0]).write(to: meeting.appendingPathComponent("action-state.json"))
+        try JSONEncoder().encode(["me": "Charlie", "them": "Maya"])
+            .write(to: meeting.appendingPathComponent("speaker-names.json"))
 
         let result = try #require(MeetingLibraryReader.read(directory: meeting))
         #expect(result.title == "Product planning")
         #expect(result.sourceName == "Zoom")
         #expect(result.summary == "Aligned on the beta plan.")
         #expect(result.actionItems.first?.isComplete == true)
-        #expect(result.transcript.map(\.speaker) == ["YOU", "OTHERS"])
+        #expect(result.transcript.map(\.speaker) == ["Charlie", "Maya"])
         #expect(result.userNotes == "Remember the customer example.")
     }
 

@@ -86,14 +86,15 @@ enum DoctorReport {
                 remediation: nil
             )
         }
-        let cache = AsrModels.defaultCacheDirectory(for: .v2)
-        if AsrModels.modelsExist(at: cache, version: .v2) {
+        let selected = LocalTranscriptionModel.selected
+        let cache = AsrModels.defaultCacheDirectory(for: selected.fluidVersion)
+        if AsrModels.modelsExist(at: cache, version: selected.fluidVersion) {
             return Check(name: "transcription", status: .ok, remediation: nil)
         }
         return Check(
             name: "transcription",
-            status: .warn("parakeet models not installed locally (~600 MB)"),
-            remediation: "run `scribe models download-transcription` while online before recording"
+            status: .warn("\(selected.title) is not installed locally"),
+            remediation: "open Settings → Models, or run `scribe models download-transcription --model \(selected.rawValue)`"
         )
     }
 

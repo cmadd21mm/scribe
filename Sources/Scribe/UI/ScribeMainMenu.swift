@@ -5,6 +5,7 @@ final class ScribeMainMenu: NSObject {
     var onToggleRecording: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onQuit: (() -> Void)?
 
     func install() {
@@ -13,6 +14,7 @@ final class ScribeMainMenu: NSObject {
         let appRoot = NSMenuItem()
         let appMenu = NSMenu(title: "Scribe")
         appMenu.addItem(withTitle: "About Scribe", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         appMenu.addItem(.separator())
@@ -47,12 +49,13 @@ final class ScribeMainMenu: NSObject {
     @objc private func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Scribe",
-            .applicationVersion: "0.1.0",
+            .applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development",
             .credits: NSAttributedString(string: "Stay in the conversation.\nFree, open source, and local first."),
         ])
     }
 
     @objc private func openSettings() { onOpenSettings?() }
+    @objc private func checkForUpdates() { onCheckForUpdates?() }
     @objc private func openFolder() { onOpenFolder?() }
     @objc private func toggleRecording() { onToggleRecording?() }
     @objc private func quit() { onQuit?() }

@@ -16,7 +16,8 @@ struct ConfigTests {
           "prompt_for_calls": false,
           "note_style": "action-focused",
           "mic_voice_processing": true,
-          "transcription": {"enabled": true, "engine": "parakeet"},
+          "transcription": {"enabled": true, "engine": "parakeet", "model": "parakeet-v3"},
+          "intelligence": {"provider": "venice", "model": "test-model", "redact_sensitive": true},
           "summarization": {
             "backend": "llama.cpp",
             "executable": "/opt/llama-cli",
@@ -35,6 +36,8 @@ struct ConfigTests {
         #expect(document.promptForCalls == false)
         #expect(document.noteStyle == "action-focused")
         #expect(document.transcription?.engine == "parakeet")
+        #expect(document.transcription?.model == "parakeet-v3")
+        #expect(document.intelligence?.provider == "venice")
         #expect(document.summarization?.backend == "llama.cpp")
         #expect(document.summarization?.modelPath == "/models/local.gguf")
         #expect(document.summarization?.predictionTokens == 900)

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ScribeAppView: View {
@@ -38,6 +39,29 @@ struct ScribeAppView: View {
             if let meeting = model.selectedMeeting {
                 MeetingRenameEditor(model: model, meeting: meeting)
             }
+        }
+        .sheet(isPresented: $model.showSpeakerEditor) {
+            if let meeting = model.selectedMeeting {
+                MeetingSpeakerEditor(model: model, meeting: meeting)
+            }
+        }
+        .sheet(isPresented: $model.showAssistant) {
+            if let meeting = model.selectedMeeting {
+                ScribeAssistantView(model: model, meeting: meeting)
+            }
+        }
+        .sheet(isPresented: $model.showOrganizer) {
+            if let meeting = model.selectedMeeting {
+                MeetingOrganizerView(model: model, meeting: meeting)
+            }
+        }
+        .sheet(isPresented: $model.showFollowUp) {
+            if let meeting = model.selectedMeeting {
+                ScribeFollowUpView(meeting: meeting)
+            }
+        }
+        .sheet(isPresented: $model.showDecisionLog) {
+            ScribeDecisionLogView(model: model)
         }
         .confirmationDialog(
             "Move this meeting to Trash?",
@@ -93,6 +117,25 @@ private struct MeetingSidebar: View {
                         .foregroundStyle(ScribeTheme.faintInk)
                 }
                 .foregroundStyle(ScribeTheme.ink)
+                .padding(.horizontal, 20)
+
+                Button {
+                    model.showDecisionLog = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "checklist.checked")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Decision Log")
+                            .font(ScribeTheme.sans(13, weight: .medium))
+                        Spacer()
+                        Text("\(model.meetings.reduce(0) { $0 + $1.decisions.count })")
+                            .font(ScribeTheme.sans(10, weight: .medium))
+                            .foregroundStyle(ScribeTheme.faintInk)
+                    }
+                    .foregroundStyle(ScribeTheme.ink)
+                }
+                .buttonStyle(.plain)
+                .scribePointer()
                 .padding(.horizontal, 20)
 
                 HStack(spacing: 8) {
@@ -327,6 +370,21 @@ private struct MeetingDetail: View {
                     .foregroundStyle(ScribeTheme.mutedInk)
                     .padding(.top, 5)
 
+                    if !meeting.workspace.project.isEmpty || !meeting.workspace.people.isEmpty || !meeting.workspace.tags.isEmpty {
+                        HStack(spacing: 7) {
+                            if !meeting.workspace.project.isEmpty {
+                                metadataPill(meeting.workspace.project, symbol: "folder")
+                            }
+                            ForEach(meeting.workspace.people.prefix(3), id: \.self) { person in
+                                metadataPill(person, symbol: "person")
+                            }
+                            ForEach(meeting.workspace.tags.prefix(2), id: \.self) { tag in
+                                metadataPill(tag, symbol: "tag")
+                            }
+                        }
+                        .padding(.top, 10)
+                    }
+
                     ScribeSectionDivider().padding(.vertical, 22)
                     contentSection(title: "Summary") {
                     Text(meeting.summary)
@@ -429,6 +487,13 @@ private struct MeetingDetail: View {
             .buttonStyle(ScribeSecondaryButtonStyle())
 
             Button {
+                model.showAssistant = true
+            } label: {
+                Label("Ask Scribe", systemImage: "sparkles")
+            }
+            .buttonStyle(ScribeSecondaryButtonStyle())
+
+            Button {
                 model.copySummary()
             } label: {
                 Text("Copy summary")
@@ -448,6 +513,15 @@ private struct MeetingDetail: View {
                 .disabled(meeting.isDemo || !meeting.hasTranscript || meeting.state == "recording" || model.regeneratingMeetingID != nil)
                 Button("Export Markdown…", systemImage: "square.and.arrow.down") {
                     model.exportSelectedMeeting()
+                }
+                Button("Organize Meeting…", systemImage: "tag") {
+                    model.showOrganizer = true
+                }
+                Button("Draft Follow-up…", systemImage: "paperplane") {
+                    model.showFollowUp = true
+                }
+                Button("Copy for AI", systemImage: "doc.on.doc") {
+                    model.copyAIContext()
                 }
                 Button("Reveal in Finder", systemImage: "folder") {
                     model.revealSelectedMeeting()
@@ -479,6 +553,16 @@ private struct MeetingDetail: View {
         }
     }
 
+    private func metadataPill(_ text: String, symbol: String) -> some View {
+        Label(text, systemImage: symbol)
+            .font(ScribeTheme.sans(9, weight: .medium))
+            .foregroundStyle(ScribeTheme.mutedInk)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(ScribeTheme.selection.opacity(0.55))
+            .clipShape(Capsule())
+    }
+
     @ViewBuilder
     private func contentSection<Content: View>(
         title: String,
@@ -500,9 +584,13 @@ private struct MeetingDetail: View {
                     .foregroundStyle(ScribeTheme.ink)
                 Spacer()
                 if !meeting.transcript.isEmpty {
-                    Text("\(meeting.transcript.count) moments")
-                        .font(ScribeTheme.sans(10, weight: .medium))
-                        .foregroundStyle(ScribeTheme.coral)
+                    Button("Name speakers", systemImage: "person.wave.2") {
+                        model.showSpeakerEditor = true
+                    }
+                    .buttonStyle(.plain)
+                    .scribePointer()
+                    .font(ScribeTheme.sans(10, weight: .medium))
+                    .foregroundStyle(ScribeTheme.coral)
                 }
             }
             if meeting.transcript.isEmpty {
@@ -517,10 +605,15 @@ private struct MeetingDetail: View {
                 VStack(alignment: .leading, spacing: 9) {
                     ForEach(meeting.transcript.prefix(16)) { line in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
-                            Text(line.timestamp)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(ScribeTheme.faintInk)
-                                .frame(width: 48, alignment: .leading)
+                            Button(line.timestamp) {
+                                model.playSelectedMeeting(at: line.startMilliseconds)
+                            }
+                            .buttonStyle(.plain)
+                            .scribePointer()
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(ScribeTheme.faintInk)
+                            .frame(width: 48, alignment: .leading)
+                            .help("Play from \(line.timestamp)")
                             Circle()
                                 .fill(speakerColor(line.speaker))
                                 .frame(width: 5, height: 5)
@@ -717,4 +810,582 @@ struct MeetingRenameEditor: View {
         guard !cleaned.isEmpty else { return }
         model.renameSelectedMeeting(to: cleaned)
     }
+}
+
+private struct MeetingSpeakerEditor: View {
+    @ObservedObject var model: ScribeAppModel
+    let meeting: MeetingRecord
+    @Environment(\.dismiss) private var dismiss
+    @State private var names: [String: String]
+    @State private var overrides: [Int: String]
+
+    init(model: ScribeAppModel, meeting: MeetingRecord) {
+        self.model = model
+        self.meeting = meeting
+        var initial = meeting.speakerNames
+        for line in meeting.transcript where initial[line.rawSpeaker] == nil {
+            initial[line.rawSpeaker] = line.speaker == "YOU" ? "Me" : line.speaker.capitalized
+        }
+        _names = State(initialValue: initial)
+        _overrides = State(initialValue: meeting.speakerOverrides)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Name speakers")
+                    .font(ScribeTheme.serif(28, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Text("Names are saved only with this meeting and update the readable transcript.")
+                    .font(ScribeTheme.sans(12))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            }
+
+            VStack(spacing: 12) {
+                ForEach(speakerIDs, id: \.self) { speakerID in
+                    HStack(spacing: 12) {
+                        Image(systemName: speakerID == "me" ? "person.crop.circle" : "person.2.circle")
+                            .font(.system(size: 18))
+                            .foregroundStyle(speakerID == "me" ? ScribeTheme.coral : ScribeTheme.blue)
+                            .frame(width: 28)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(speakerID == "me" ? "Microphone track" : "Call audio track")
+                                .font(ScribeTheme.sans(10))
+                                .foregroundStyle(ScribeTheme.faintInk)
+                            TextField("Speaker name", text: binding(for: speakerID))
+                                .textFieldStyle(.roundedBorder)
+                                .font(ScribeTheme.sans(13))
+                        }
+                    }
+                }
+            }
+
+            if speakerIDs.contains("them") && !meeting.transcript.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("CORRECT INDIVIDUAL MOMENTS")
+                        .font(ScribeTheme.sans(9, weight: .bold))
+                        .tracking(1)
+                        .foregroundStyle(ScribeTheme.coral)
+                    Text("If several people share the call track, type a name beside any moment that needs a correction.")
+                        .font(ScribeTheme.sans(10))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(meeting.transcript) { line in
+                                HStack(alignment: .center, spacing: 9) {
+                                    Text(line.timestamp)
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(ScribeTheme.faintInk)
+                                        .frame(width: 42, alignment: .leading)
+                                    Text(line.text)
+                                        .font(ScribeTheme.sans(10))
+                                        .foregroundStyle(ScribeTheme.mutedInk)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    TextField(names[line.rawSpeaker] ?? line.speaker, text: overrideBinding(for: line.id))
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(ScribeTheme.sans(10))
+                                        .frame(width: 125)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .scribePointer()
+                Button("Save names") { model.saveSpeakerDetails(names: names, overrides: overrides) }
+                    .buttonStyle(ScribePrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 650, height: speakerIDs.contains("them") ? 650 : 380)
+        .background(ScribeTheme.paper)
+    }
+
+    private var speakerIDs: [String] {
+        Array(Set(meeting.transcript.map(\.rawSpeaker))).sorted { lhs, _ in lhs == "me" }
+    }
+
+    private func binding(for id: String) -> Binding<String> {
+        Binding(
+            get: { names[id] ?? "" },
+            set: { names[id] = $0 }
+        )
+    }
+
+    private func overrideBinding(for id: Int) -> Binding<String> {
+        Binding(
+            get: { overrides[id] ?? "" },
+            set: { overrides[id] = $0 }
+        )
+    }
+}
+
+private struct ScribeAssistantView: View {
+    enum Scope: String, CaseIterable {
+        case meeting = "This meeting"
+        case project = "This project"
+        case all = "All meetings"
+    }
+
+    @ObservedObject var model: ScribeAppModel
+    let meeting: MeetingRecord
+    @Environment(\.dismiss) private var dismiss
+    @State private var question = ""
+    @State private var messages: [ScribeChatMessage] = []
+    @State private var scope: Scope = .meeting
+    @State private var isAnswering = false
+    @FocusState private var questionFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ask Scribe")
+                        .font(ScribeTheme.serif(28, weight: .semibold))
+                        .foregroundStyle(ScribeTheme.ink)
+                    Text(scope == .meeting
+                         ? meeting.title
+                         : scope == .project
+                            ? "Project: \(meeting.workspace.project)"
+                            : "Search across your meeting library")
+                        .font(ScribeTheme.sans(12))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+                Spacer()
+                Picker("Scope", selection: $scope) {
+                    Text(Scope.meeting.rawValue).tag(Scope.meeting)
+                    if !meeting.workspace.project.isEmpty {
+                        Text("Project: \(meeting.workspace.project)").tag(Scope.project)
+                    }
+                    Text(Scope.all.rawValue).tag(Scope.all)
+                }
+                .labelsHidden()
+                .frame(width: 150)
+                .scribePointer()
+                Button("Done") { dismiss() }
+                    .scribePointer()
+            }
+            .padding(22)
+
+            ScribeSectionDivider()
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if messages.isEmpty {
+                            emptyAssistant
+                        }
+                        ForEach(messages) { message in
+                            chatBubble(message)
+                                .id(message.id)
+                        }
+                        if isAnswering {
+                            HStack(spacing: 9) {
+                                ProgressView().controlSize(.small)
+                                Text("Reading the selected meeting context…")
+                                    .font(ScribeTheme.sans(11))
+                                    .foregroundStyle(ScribeTheme.faintInk)
+                            }
+                            .padding(14)
+                        }
+                    }
+                    .padding(22)
+                }
+                .onChange(of: messages.count) { _, _ in
+                    if let last = messages.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                }
+            }
+
+            ScribeSectionDivider()
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    TextField("Ask about a decision, person, deadline, or topic…", text: $question)
+                        .textFieldStyle(.plain)
+                        .font(ScribeTheme.sans(13))
+                        .focused($questionFocused)
+                        .onSubmit(ask)
+                    Button("Ask", action: ask)
+                        .buttonStyle(ScribePrimaryButtonStyle())
+                        .disabled(question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isAnswering)
+                }
+                .padding(10)
+                .background(Color.white.opacity(0.62))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ScribeTheme.divider, lineWidth: 1))
+
+                HStack {
+                    Label(privacyLabel, systemImage: model.aiSettings.provider == .local ? "lock.shield" : "network")
+                        .font(ScribeTheme.sans(9))
+                        .foregroundStyle(ScribeTheme.faintInk)
+                    Spacer()
+                    Button("Copy context") { model.copyAIContext() }
+                        .buttonStyle(.plain)
+                        .scribePointer()
+                        .font(ScribeTheme.sans(10, weight: .medium))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                    Button("AI settings…") { model.showAISettings = true }
+                        .buttonStyle(.plain)
+                        .scribePointer()
+                        .font(ScribeTheme.sans(10, weight: .medium))
+                        .foregroundStyle(ScribeTheme.coral)
+                }
+            }
+            .padding(18)
+        }
+        .frame(width: 760, height: 700)
+        .background(ScribeTheme.paper)
+        .onAppear { questionFocused = true }
+        .sheet(isPresented: $model.showAISettings) {
+            ScribeAISettingsView(model: model)
+        }
+    }
+
+    private var selectedMeetings: [MeetingRecord] {
+        switch scope {
+        case .meeting: return [meeting]
+        case .project:
+            return model.meetings.filter { $0.workspace.project == meeting.workspace.project }
+        case .all: return model.meetings
+        }
+    }
+
+    private var privacyLabel: String {
+        model.aiSettings.provider == .local
+            ? "Runs on this Mac"
+            : "Sends selected context to \(model.aiSettings.provider.title) only when you ask"
+    }
+
+    private var emptyAssistant: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 25))
+                .foregroundStyle(ScribeTheme.coral)
+            Text("Start with something useful")
+                .font(ScribeTheme.serif(20, weight: .semibold))
+                .foregroundStyle(ScribeTheme.ink)
+            VStack(alignment: .leading, spacing: 9) {
+                suggestion("What decisions did we make?")
+                suggestion("What do I owe, and when?")
+                suggestion("Find the moment we discussed launch risk.")
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.38))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func suggestion(_ text: String) -> some View {
+        Button(text) { question = text; ask() }
+            .buttonStyle(.plain)
+            .scribePointer()
+            .font(ScribeTheme.sans(12, weight: .medium))
+            .foregroundStyle(ScribeTheme.mutedInk)
+    }
+
+    private func chatBubble(_ message: ScribeChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text(message.role == .user ? "YOU" : "SCRIBE")
+                .font(ScribeTheme.sans(9, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(message.role == .user ? ScribeTheme.blue : ScribeTheme.coral)
+            Text(message.text)
+                .font(ScribeTheme.sans(13))
+                .foregroundStyle(ScribeTheme.ink)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+            if message.role == .assistant && scope == .meeting {
+                let stamps = timestamps(in: message.text)
+                if !stamps.isEmpty {
+                    HStack(spacing: 8) {
+                        ForEach(stamps, id: \.self) { stamp in
+                            Button(stamp, systemImage: "play.fill") {
+                                model.playSelectedMeeting(at: milliseconds(from: stamp))
+                            }
+                            .buttonStyle(.plain)
+                            .scribePointer()
+                            .font(ScribeTheme.sans(9, weight: .medium))
+                            .foregroundStyle(ScribeTheme.coral)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(message.role == .user ? ScribeTheme.selection.opacity(0.48) : Color.white.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+    }
+
+    private func ask() {
+        let value = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, !isAnswering else { return }
+        messages.append(ScribeChatMessage(role: .user, text: value))
+        question = ""
+        isAnswering = true
+        let settings = model.aiSettings
+        let meetings = selectedMeetings
+        Task {
+            do {
+                let answer = try await ScribeMeetingAssistant.answer(
+                    question: value,
+                    meetings: meetings,
+                    settings: settings
+                )
+                messages.append(ScribeChatMessage(role: .assistant, text: answer))
+            } catch {
+                messages.append(ScribeChatMessage(
+                    role: .assistant,
+                    text: "I couldn’t answer that: \(error.localizedDescription)"
+                ))
+            }
+            isAnswering = false
+        }
+    }
+
+    private func timestamps(in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"\[(\d{1,2}:\d{2}(?::\d{2})?)\]"#) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return Array(Set(regex.matches(in: text, range: range).compactMap { match in
+            guard let range = Range(match.range(at: 1), in: text) else { return nil }
+            return String(text[range])
+        })).sorted()
+    }
+
+    private func milliseconds(from stamp: String) -> Int {
+        let values = stamp.split(separator: ":").compactMap { Int($0) }
+        if values.count == 3 { return ((values[0] * 3600) + (values[1] * 60) + values[2]) * 1_000 }
+        if values.count == 2 { return ((values[0] * 60) + values[1]) * 1_000 }
+        return 0
+    }
+}
+
+private struct MeetingOrganizerView: View {
+    @ObservedObject var model: ScribeAppModel
+    let meeting: MeetingRecord
+    @Environment(\.dismiss) private var dismiss
+    @State private var project: String
+    @State private var people: String
+    @State private var tags: String
+
+    init(model: ScribeAppModel, meeting: MeetingRecord) {
+        self.model = model
+        self.meeting = meeting
+        _project = State(initialValue: meeting.workspace.project)
+        _people = State(initialValue: meeting.workspace.people.joined(separator: ", "))
+        _tags = State(initialValue: meeting.workspace.tags.joined(separator: ", "))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Organize meeting")
+                    .font(ScribeTheme.serif(28, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Text("Projects and people make search and cross-meeting questions more useful.")
+                    .font(ScribeTheme.sans(12))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            }
+            organizerField("Project", placeholder: "e.g. Northstar launch", value: $project)
+            organizerField("People", placeholder: "Comma-separated names", value: $people)
+            organizerField("Tags", placeholder: "e.g. planning, customer, 1:1", value: $tags)
+            HStack {
+                Label("Saved locally beside this meeting.", systemImage: "internaldrive")
+                    .font(ScribeTheme.sans(10))
+                    .foregroundStyle(ScribeTheme.faintInk)
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .scribePointer()
+                Button("Save") {
+                    model.saveWorkspace(MeetingWorkspace(
+                        project: project.trimmingCharacters(in: .whitespacesAndNewlines),
+                        people: split(people),
+                        tags: split(tags)
+                    ))
+                }
+                .buttonStyle(ScribePrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 590, height: 410)
+        .background(ScribeTheme.paper)
+    }
+
+    private func organizerField(_ title: String, placeholder: String, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(ScribeTheme.sans(9, weight: .bold))
+                .tracking(1)
+                .foregroundStyle(ScribeTheme.coral)
+            TextField(placeholder, text: value)
+                .textFieldStyle(.roundedBorder)
+                .font(ScribeTheme.sans(13))
+        }
+    }
+
+    private func split(_ value: String) -> [String] {
+        value.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+}
+
+private struct ScribeFollowUpView: View {
+    let meeting: MeetingRecord
+    @Environment(\.dismiss) private var dismiss
+    @State private var kind: ScribeFollowUpKind = .recap
+    @State private var draft: String
+
+    init(meeting: MeetingRecord) {
+        self.meeting = meeting
+        _draft = State(initialValue: ScribeFollowUpComposer.draft(kind: .recap, meeting: meeting))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Draft follow-up")
+                        .font(ScribeTheme.serif(28, weight: .semibold))
+                        .foregroundStyle(ScribeTheme.ink)
+                    Text("Nothing is sent automatically.")
+                        .font(ScribeTheme.sans(11))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+                Spacer()
+                Picker("Format", selection: $kind) {
+                    ForEach(ScribeFollowUpKind.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .labelsHidden()
+                .frame(width: 150)
+                .onChange(of: kind) { _, value in
+                    draft = ScribeFollowUpComposer.draft(kind: value, meeting: meeting)
+                }
+            }
+            TextEditor(text: $draft)
+                .font(ScribeTheme.sans(13))
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .background(Color.white.opacity(0.58))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ScribeTheme.divider, lineWidth: 1))
+            HStack {
+                Text("Review and edit before sharing.")
+                    .font(ScribeTheme.sans(10))
+                    .foregroundStyle(ScribeTheme.faintInk)
+                Spacer()
+                Button("Done") { dismiss() }
+                    .scribePointer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(draft, forType: .string)
+                }
+                .buttonStyle(ScribePrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 720, height: 620)
+        .background(ScribeTheme.paper)
+    }
+}
+
+private struct ScribeDecisionLogView: View {
+    @ObservedObject var model: ScribeAppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Decision log")
+                        .font(ScribeTheme.serif(28, weight: .semibold))
+                        .foregroundStyle(ScribeTheme.ink)
+                    Text("Every captured decision, linked back to its meeting.")
+                        .font(ScribeTheme.sans(12))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                }
+                Spacer()
+                Button("Done") { dismiss() }.scribePointer()
+            }
+            .padding(24)
+            ScribeSectionDivider()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    if decisions.isEmpty {
+                        ContentUnavailableView(
+                            "No decisions yet",
+                            systemImage: "checklist.checked",
+                            description: Text("Decisions identified in meeting notes will collect here.")
+                        )
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                        .frame(maxWidth: .infinity, minHeight: 340)
+                    } else {
+                        ForEach(decisions, id: \.id) { entry in
+                            Button {
+                                model.selectedMeetingID = entry.meeting.id
+                                dismiss()
+                            } label: {
+                                HStack(alignment: .top, spacing: 12) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(ScribeTheme.coral)
+                                        .padding(.top, 2)
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(entry.text)
+                                            .font(ScribeTheme.sans(13, weight: .medium))
+                                            .foregroundStyle(ScribeTheme.ink)
+                                            .multilineTextAlignment(.leading)
+                                        Text("\(entry.meeting.title) · \(Self.date.string(from: entry.meeting.startedAt))")
+                                            .font(ScribeTheme.sans(10))
+                                            .foregroundStyle(ScribeTheme.faintInk)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "arrow.right")
+                                        .foregroundStyle(ScribeTheme.faintInk)
+                                }
+                                .padding(14)
+                                .background(Color.white.opacity(0.48))
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            }
+                            .buttonStyle(.plain)
+                            .scribePointer()
+                        }
+                    }
+                }
+                .padding(24)
+            }
+        }
+        .frame(width: 700, height: 620)
+        .background(ScribeTheme.paper)
+    }
+
+    private struct Entry: Identifiable {
+        let id: String
+        let text: String
+        let meeting: MeetingRecord
+    }
+
+    private var decisions: [Entry] {
+        model.meetings.flatMap { meeting in
+            meeting.decisions.enumerated().map { index, value in
+                Entry(id: "\(meeting.id)-\(index)", text: value, meeting: meeting)
+            }
+        }
+    }
+
+    private static let date: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter
+    }()
 }

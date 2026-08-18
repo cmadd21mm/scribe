@@ -2,7 +2,7 @@ import AVFoundation
 import FluidAudio
 import Foundation
 
-/// Parakeet TDT 0.6B v2 (English) via FluidAudio's Core ML port. Models
+/// The user-selected Parakeet model via FluidAudio's Core ML port. Models
 /// must already exist in FluidAudio's managed cache. Runtime transcription
 /// never downloads; model acquisition is an explicit CLI operation.
 actor ParakeetEngine: TranscriptionEngine {
@@ -24,17 +24,23 @@ actor ParakeetEngine: TranscriptionEngine {
     }
 
     nonisolated let name = "parakeet"
-    nonisolated let model = "parakeet-tdt-0.6b-v2-coreml"
+    nonisolated let selectedModel: LocalTranscriptionModel
+    nonisolated var model: String { selectedModel.modelIdentifier }
 
     private var manager: AsrManager?
 
+    init(model: LocalTranscriptionModel = .selected) {
+        selectedModel = model
+    }
+
     func prepare() async throws {
         guard manager == nil else { return }
-        let cache = AsrModels.defaultCacheDirectory(for: .v2)
-        guard AsrModels.modelsExist(at: cache, version: .v2) else {
+        let version = selectedModel.fluidVersion
+        let cache = AsrModels.defaultCacheDirectory(for: version)
+        guard AsrModels.modelsExist(at: cache, version: version) else {
             throw EngineError.modelMissing(cache)
         }
-        let models = try await AsrModels.load(from: cache, version: .v2)
+        let models = try await AsrModels.load(from: cache, version: version)
         let manager = AsrManager()
         try await manager.loadModels(models)
         self.manager = manager

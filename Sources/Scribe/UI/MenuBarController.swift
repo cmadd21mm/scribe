@@ -13,6 +13,7 @@ final class MenuBarController {
     var onOpenApp: (() -> Void)?
     var onOpenFolder: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
     var onQuit: (() -> Void)?
 
     init() {
@@ -60,6 +61,13 @@ final class MenuBarController {
         )
         menu.addItem(settings)
 
+        let updates = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdatesClicked),
+            keyEquivalent: ""
+        )
+        menu.addItem(updates)
+
         menu.addItem(.separator())
 
         let quit = NSMenuItem(
@@ -69,7 +77,7 @@ final class MenuBarController {
         )
         menu.addItem(quit)
 
-        for item in [openApp, toggleItem, openFolder, settings, quit] {
+        for item in [openApp, toggleItem, openFolder, settings, updates, quit] {
             item.target = self
         }
 
@@ -105,5 +113,6 @@ final class MenuBarController {
     @objc private func toggleClicked() { onToggle?() }
     @objc private func openFolderClicked() { onOpenFolder?() }
     @objc private func settingsClicked() { onSettings?() }
+    @objc private func checkForUpdatesClicked() { onCheckForUpdates?() }
     @objc private func quitClicked() { onQuit?() }
 }

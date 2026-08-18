@@ -4,5 +4,6 @@
 .DS_Store
 *.xcuserstate
 dist/
+outputs/
 scribe-demo*.png
 scribe-design*.png
