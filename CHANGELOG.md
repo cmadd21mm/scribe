@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Made Venice model discovery use its fast public text-model catalog first,
+  with authenticated retry if Venice requires it.
+- Added a 12-second model-list timeout and a visible Cancel action so provider
+  setup can never remain on an indefinite spinner.
+
 ## 0.2.4
 
 - Restored the standard macOS Edit menu so Paste and the usual text-editing

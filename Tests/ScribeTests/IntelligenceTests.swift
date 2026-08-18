@@ -4,6 +4,29 @@ import Testing
 @testable import Scribe
 
 struct IntelligenceTests {
+    @Test("Venice model discovery uses the fast public catalog with a short deadline")
+    func veniceModelRequest() throws {
+        let request = try ScribeAIModelCatalog.modelListRequest(
+            provider: .venice,
+            baseURL: "",
+            apiKey: "secret"
+        )
+        #expect(request.url?.absoluteString == "https://api.venice.ai/api/v1/models?type=text")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        #expect(request.timeoutInterval == 12)
+    }
+
+    @Test("Venice model discovery can retry with authentication if its catalog requires it")
+    func authenticatedVeniceModelRequest() throws {
+        let request = try ScribeAIModelCatalog.modelListRequest(
+            provider: .venice,
+            baseURL: "",
+            apiKey: "secret",
+            authenticateVenice: true
+        )
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
+    }
+
     @Test("Venice model catalog keeps text models and friendly names")
     func parsesVeniceModels() throws {
         let data = Data(#"""

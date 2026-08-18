@@ -469,6 +469,7 @@ struct ScribeAISettingsView: View {
     @State private var modelLoadError: String?
     @State private var usesManualModelEntry = false
     @State private var modelRequestID = UUID()
+    @State private var modelLoadTask: Task<Void, Never>?
 
     init(model: ScribeAppModel, onClose: (() -> Void)? = nil) {
         self.model = model
@@ -519,6 +520,8 @@ struct ScribeAISettingsView: View {
                     modelLoadError = nil
                     usesManualModelEntry = false
                     modelRequestID = UUID()
+                    modelLoadTask?.cancel()
+                    modelLoadTask = nil
                     isLoadingModels = false
                 }
 
@@ -540,6 +543,8 @@ struct ScribeAISettingsView: View {
                                 modelSearch = ""
                                 modelLoadError = nil
                                 modelRequestID = UUID()
+                                modelLoadTask?.cancel()
+                                modelLoadTask = nil
                                 isLoadingModels = false
                             }
                     }
@@ -554,6 +559,8 @@ struct ScribeAISettingsView: View {
                                 modelSearch = ""
                                 modelLoadError = nil
                                 modelRequestID = UUID()
+                                modelLoadTask?.cancel()
+                                modelLoadTask = nil
                                 isLoadingModels = false
                             }
                     }
@@ -601,6 +608,7 @@ struct ScribeAISettingsView: View {
         }
         .frame(width: 640, height: provider == .local ? 390 : 690)
         .background(ScribeTheme.paper)
+        .onDisappear { cancelModelLoad() }
     }
 
     @ViewBuilder
@@ -625,6 +633,12 @@ struct ScribeAISettingsView: View {
                     Text("Loading models available to this account…")
                         .font(ScribeTheme.sans(11))
                         .foregroundStyle(ScribeTheme.mutedInk)
+                    Spacer()
+                    Button("Cancel") { cancelModelLoad() }
+                        .buttonStyle(.plain)
+                        .font(ScribeTheme.sans(10, weight: .medium))
+                        .foregroundStyle(ScribeTheme.coral)
+                        .scribePointer()
                 }
                 .frame(height: 32)
             } else if !availableModels.isEmpty && !usesManualModelEntry {
@@ -756,6 +770,7 @@ struct ScribeAISettingsView: View {
     }
 
     private func loadModels() {
+        modelLoadTask?.cancel()
         let requestID = UUID()
         modelRequestID = requestID
         let requestedProvider = provider
@@ -763,7 +778,7 @@ struct ScribeAISettingsView: View {
         let requestedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         isLoadingModels = true
         modelLoadError = nil
-        Task {
+        modelLoadTask = Task {
             do {
                 let options = try await ScribeAIModelCatalog.fetch(
                     provider: requestedProvider,
@@ -781,12 +796,21 @@ struct ScribeAISettingsView: View {
                 usesManualModelEntry = false
             } catch {
                 guard modelRequestID == requestID else { return }
+                guard !Task.isCancelled else { return }
                 availableModels = []
                 modelLoadError = error.localizedDescription
             }
             guard modelRequestID == requestID else { return }
             isLoadingModels = false
+            modelLoadTask = nil
         }
+    }
+
+    private func cancelModelLoad() {
+        modelRequestID = UUID()
+        modelLoadTask?.cancel()
+        modelLoadTask = nil
+        isLoadingModels = false
     }
 
     private func close() {
