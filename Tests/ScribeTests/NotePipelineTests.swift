@@ -62,30 +62,11 @@ struct NotePipelineTests {
             context: .fallback(title: "Call", sourceBundleID: nil),
             reason: "no local summarization model is configured"
         )
-        #expect(markdown.contains("Structured notes were not generated"))
+        #expect(markdown.contains("## Summary\n\n_Not generated._"))
+        #expect(markdown.contains("## Summary setup"))
         #expect(markdown.contains("no local summarization model"))
         #expect(markdown.contains("[transcript](transcript.md)"))
         #expect(markdown.contains("did not make a network call"))
-    }
-
-    @Test("Built-in notes never guess decisions or assignments without a model")
-    func builtInNotesStayConservative() async throws {
-        let transcript = """
-        **[00:01] Priya:** Let's ship the smaller beta.
-        **[00:08] Jordan:** I'll share the onboarding prototype by Thursday.
-        **[00:15] Alex:** Who owns the support review?
-        """
-        let note = try await BuiltInMeetingSummarizer().summarize(.init(
-            title: "Beta planning",
-            attendees: [],
-            transcriptMarkdown: transcript,
-            userNotes: "Make sure Jordan's prototype is included in the follow-up.",
-            style: .balanced
-        ))
-        #expect(note.summary.contains("transcript is ready"))
-        #expect(note.decisions.isEmpty)
-        #expect(note.actionItems.isEmpty)
-        #expect(note.openQuestions.isEmpty)
     }
 
     @Test("An explicit remote summarizer is rendered without claiming local generation")

@@ -52,7 +52,7 @@ enum NoteRenderer {
 
         ## Summary
 
-        > Structured notes were not generated: \(reason)
+        _Not generated._
 
         ## Decisions
 
@@ -65,6 +65,10 @@ enum NoteRenderer {
         ## Open questions
 
         _Not generated._
+
+        ## Summary setup
+
+        Connect a capable summary model before generating meeting analysis: \(reason).
 
         ---
 
@@ -135,18 +139,9 @@ enum NotePipeline {
                     backendName: summarizer.backendName
                 )
             } catch {
-                let fallback = BuiltInMeetingSummarizer()
-                let note = try await fallback.summarize(SummarizationRequest(
-                    title: context.title,
-                    attendees: context.attendees,
-                    transcriptMarkdown: transcriptMarkdown,
-                    userNotes: userNotes,
-                    style: Config.noteStyle()
-                ))
-                rendered = NoteRenderer.render(
+                rendered = NoteRenderer.unavailable(
                     context: context,
-                    note: note,
-                    backendName: fallback.backendName
+                    reason: "the configured local summary model failed: \(error.localizedDescription)"
                 )
             }
         case .unavailable(let reason):

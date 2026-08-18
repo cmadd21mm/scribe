@@ -172,22 +172,22 @@ enum Config {
 
     static func localSummarizer() -> LocalSummarizerConfiguration {
         guard let summary = load()?.summarization else {
-            return .available(BuiltInMeetingSummarizer())
+            return .unavailable("connect a summary model in Meeting AI settings")
         }
         guard summary.backend == "llama.cpp" else {
-            return .available(BuiltInMeetingSummarizer())
+            return .unavailable("connect a supported summary model in Meeting AI settings")
         }
         guard let executablePath = summary.executable,
               let modelPath = summary.modelPath else {
-            return .available(BuiltInMeetingSummarizer())
+            return .unavailable("the configured local summary model is incomplete")
         }
         let executable = URL(fileURLWithPath: expand(executablePath))
         let model = URL(fileURLWithPath: expand(modelPath))
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
-            return .available(BuiltInMeetingSummarizer())
+            return .unavailable("the configured local summary executable is unavailable")
         }
         guard FileManager.default.fileExists(atPath: model.path) else {
-            return .available(BuiltInMeetingSummarizer())
+            return .unavailable("the configured local summary model is unavailable")
         }
         return .available(LlamaCppSummarizer(
             executable: executable,

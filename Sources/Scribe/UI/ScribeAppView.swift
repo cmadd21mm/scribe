@@ -390,18 +390,24 @@ private struct MeetingDetail: View {
                     contentSection(title: "Summary") {
                         if meeting.summary.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
-                                Text("The transcript is ready. Generate private notes on this Mac when you’re ready.")
+                                Text(model.configuredSummaryAIName.map {
+                                    "The transcript is ready. Generate reliable meeting analysis with \($0)."
+                                } ?? "The transcript is ready. Connect a separate AI or capable local model to create a reliable summary and action items.")
                                     .font(ScribeTheme.sans(13))
                                     .foregroundStyle(ScribeTheme.mutedInk)
                                 Button {
-                                    model.regenerateSelectedNote()
+                                    if model.configuredSummaryAIName == nil {
+                                        model.showAISettings = true
+                                    } else {
+                                        model.regenerateSelectedNote()
+                                    }
                                 } label: {
                                     Label(
                                         model.regeneratingMeetingID == meeting.id
                                             ? "Generating summary…"
                                             : model.configuredSummaryAIName.map { "Generate with \($0)" }
-                                                ?? "Generate summary",
-                                        systemImage: "sparkles"
+                                                ?? "Set up meeting AI…",
+                                        systemImage: model.configuredSummaryAIName == nil ? "gearshape" : "sparkles"
                                     )
                                 }
                                 .buttonStyle(ScribePrimaryButtonStyle())
@@ -444,7 +450,9 @@ private struct MeetingDetail: View {
                     ScribeSectionDivider().padding(.vertical, 22)
                     contentSection(title: "Action Items") {
                         if meeting.actionItems.isEmpty {
-                            Text("No action items were identified.")
+                            Text(meeting.summary.isEmpty
+                                 ? "Action items will appear after a reliable summary is generated."
+                                 : "No action items were identified.")
                                 .font(ScribeTheme.sans(13))
                                 .foregroundStyle(ScribeTheme.faintInk)
                         } else {
@@ -546,6 +554,7 @@ private struct MeetingDetail: View {
                 Text("Copy summary")
             }
             .buttonStyle(ScribePrimaryButtonStyle())
+            .disabled(meeting.summary.isEmpty)
 
             Menu {
                 Button("Rename Meeting…", systemImage: "pencil") {
