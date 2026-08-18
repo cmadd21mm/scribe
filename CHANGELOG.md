@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+- Restored the standard macOS Edit menu so Paste and the usual text-editing
+  shortcuts work in API keys, Ask Scribe, search, rename, notes, and Settings.
+- Corrected responder-chain targets for system-owned Hide and Close commands.
+
 ## 0.2.3
 
 - Replaced manual AI model-name setup with an account-aware, searchable model
