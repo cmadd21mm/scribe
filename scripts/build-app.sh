@@ -14,15 +14,25 @@ if [ "${SCRIBE_UNIVERSAL:-0}" = "1" ]; then
         --arch arm64 --arch x86_64 \
         --scratch-path "$UNIVERSAL_BUILD_DIR"
     SCRIBE_BINARY="$UNIVERSAL_BUILD_DIR/apple/Products/Release/scribe"
+    SPARKLE_ARTIFACTS="$UNIVERSAL_BUILD_DIR/artifacts"
 else
     swift build -c release --product scribe
     SCRIBE_BINARY="$PROJECT_ROOT/.build/release/scribe"
+    SPARKLE_ARTIFACTS="$PROJECT_ROOT/.build/artifacts"
 fi
 
 rm -rf "$APP_DIR" "$ICONSET_DIR"
-mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$ICONSET_DIR"
+mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources" "$APP_DIR/Contents/Frameworks" "$ICONSET_DIR"
 cp "$SCRIBE_BINARY" "$APP_DIR/Contents/MacOS/Scribe"
 cp "Sources/Scribe/Info.plist" "$APP_DIR/Contents/Info.plist"
+
+SPARKLE_FRAMEWORK="$SPARKLE_ARTIFACTS/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+if [ -d "$SPARKLE_FRAMEWORK" ]; then
+    cp -R "$SPARKLE_FRAMEWORK" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+else
+    printf '%s\n' "missing Sparkle.framework at $SPARKLE_FRAMEWORK" >&2
+    exit 1
+fi
 
 make_icon() {
     size=$1
@@ -44,7 +54,13 @@ iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/Scribe.icns"
 rm -rf "$ICONSET_DIR"
 
 SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
-codesign --force --deep --options runtime --sign "$SIGNING_IDENTITY" "$APP_DIR"
+if [ "$SIGNING_IDENTITY" = "-" ]; then
+    # Ad-hoc local builds have no Team ID, so hardened library validation
+    # cannot establish that the app and Sparkle share a signer.
+    codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR"
+else
+    codesign --force --deep --options runtime --sign "$SIGNING_IDENTITY" "$APP_DIR"
+fi
 codesign --verify --deep --strict "$APP_DIR"
 
 printf '%s\n' "$APP_DIR"

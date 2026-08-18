@@ -18,6 +18,13 @@ actions, and your own notes together in plain files.
 - **Useful after the call.** Search every note, rename or trash meetings, copy a
   summary, check off action items, add personal context, play the recording, or
   export Markdown.
+- **Ask with evidence.** Ask one meeting, a project, or the whole library and
+  jump from timestamp citations to the recording. The default assistant runs
+  locally; optional Venice, OpenAI, Claude, Grok, and compatible endpoints are
+  invoked only after you connect them and press Ask.
+- **Turn talk into follow-through.** Keep a decision log, group work by project
+  and people, correct speaker names, and draft recap emails, status updates,
+  agendas, or task lists without sending anything automatically.
 - **Notes that fit the moment.** Choose concise, balanced, detailed, or
   action-focused summaries. Your quick notes guide the result, and saving an
   edit refreshes the summary. The built-in local fallback works with no setup.
@@ -53,6 +60,10 @@ and Intel Macs running macOS 15 or newer. The first recording asks for:
 - Screen & System Audio Recording for the other side
 - Calendar access only if you want automatic meeting titles
 
+After installing 0.2 or newer, choose **Scribe → Check for Updates…** or
+**Settings → Check now…**. Scribe verifies the signed update and installs it
+over the existing copy; updates are never forced.
+
 The release scripts support Apple Developer ID signing and notarization. Local
 builds are ad-hoc signed; macOS may ask you to confirm opening one through
 **System Settings → Privacy & Security**.
@@ -80,17 +91,25 @@ For a signed build, set `APPLE_SIGNING_IDENTITY`. To notarize the DMG, also set
 
 ## Local transcription and summaries
 
-Transcription uses FluidAudio's local Parakeet TDT model. Download it once from
-Scribe Settings, or explicitly from Terminal:
+Transcription uses FluidAudio's local Parakeet models. Settings offers English
+(recommended), multilingual, and compact choices with explicit installed,
+selected, and downloading states. Download one once from Scribe Settings, or
+explicitly from Terminal:
 
 ```sh
-scribe models download-transcription
+scribe models download-transcription --model parakeet-v2
 ```
 
 Normal recording and transcription make no network requests. Scribe always
 creates a private structured note with a summary, decisions, action items, and
 open questions. An optional locally installed `llama.cpp` executable and GGUF
 model can make those notes richer; the built-in fallback requires no setup.
+
+Ask Scribe also works locally with timestamped retrieval. Optional remote AI
+connections use an API key stored in the Mac Keychain. Ordinary ChatGPT,
+Claude, Grok, or Venice subscriptions may not include API access. Scribe sends
+only the selected context after the user asks a question, redacts common
+contact details by default, and sets `store: false` for OpenAI requests.
 
 ## Your files
 
@@ -106,7 +125,10 @@ Obsidian-friendly folder:
 ├── transcript.md
 ├── note.md
 ├── user-notes.md
-└── action-state.json
+├── action-state.json
+├── speaker-names.json
+├── speaker-overrides.json
+└── scribe-context.json
 ```
 
 Incomplete recordings are recovered on the next launch. A free-space check runs
@@ -123,7 +145,15 @@ Preferences are written to `~/.config/scribe/config.json`.
   "call_prompt_delay_seconds": 8,
   "minimum_free_disk_gb": 2,
   "mic_voice_processing": false,
-  "transcription": { "enabled": true, "engine": "parakeet" }
+  "transcription": {
+    "enabled": true,
+    "engine": "parakeet",
+    "model": "parakeet-v2"
+  },
+  "intelligence": {
+    "provider": "local",
+    "redact_sensitive": true
+  }
 }
 ```
 
@@ -143,7 +173,7 @@ scribe doctor
 scribe transcribe <meeting-folder>
 scribe note <meeting-folder>
 scribe recover
-scribe models download-transcription
+scribe models download-transcription --model parakeet-v2
 ```
 
 Control commands use local distributed notifications and do not contact a

@@ -14,8 +14,23 @@ struct MeetingActionItem: Identifiable, Hashable, Sendable {
 struct MeetingTranscriptLine: Identifiable, Hashable, Sendable {
     let id: Int
     let startMilliseconds: Int
+    let rawSpeaker: String
     let speaker: String
     let text: String
+
+    init(
+        id: Int,
+        startMilliseconds: Int,
+        speaker: String,
+        text: String,
+        rawSpeaker: String? = nil
+    ) {
+        self.id = id
+        self.startMilliseconds = startMilliseconds
+        self.rawSpeaker = rawSpeaker ?? speaker.lowercased()
+        self.speaker = speaker
+        self.text = text
+    }
 
     var timestamp: String {
         let total = startMilliseconds / 1_000
@@ -43,6 +58,9 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     var openQuestions: [String]
     var transcript: [MeetingTranscriptLine]
     var userNotes: String
+    var speakerNames: [String: String] = [:]
+    var speakerOverrides: [Int: String] = [:]
+    var workspace: MeetingWorkspace = .init()
     var isDemo: Bool = false
 
     var hasTranscript: Bool { !transcript.isEmpty }
@@ -65,8 +83,10 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     }
 
     var searchableText: String {
-        var fields = [title, summary, userNotes]
+        var fields = [title, summary, userNotes, workspace.project]
         fields.append(contentsOf: attendees)
+        fields.append(contentsOf: workspace.people)
+        fields.append(contentsOf: workspace.tags)
         fields.append(contentsOf: decisions)
         fields.append(contentsOf: actionItems.map(\.text))
         fields.append(contentsOf: openQuestions)
@@ -198,7 +218,13 @@ enum MeetingLibraryReader {
             .map { index, item in
                 MeetingActionItem(id: index, text: cleanAction(item), isComplete: completed.contains(index))
             }
-        let transcript = readTranscript(directory)
+        let speakerNames = readSpeakerNames(directory)
+        let speakerOverrides = readSpeakerOverrides(directory)
+        let transcript = readTranscript(
+            directory,
+            speakerNames: speakerNames,
+            speakerOverrides: speakerOverrides
+        )
         let userNotes = (try? String(
             contentsOf: directory.appendingPathComponent("user-notes.md"),
             encoding: .utf8
@@ -218,7 +244,10 @@ enum MeetingLibraryReader {
             actionItems: actions,
             openQuestions: parseList(sections["open questions"] ?? ""),
             transcript: transcript,
-            userNotes: userNotes
+            userNotes: userNotes,
+            speakerNames: speakerNames,
+            speakerOverrides: speakerOverrides,
+            workspace: MeetingWorkspaceStore.read(from: directory)
         )
     }
 
@@ -314,7 +343,11 @@ enum MeetingLibraryReader {
         try Data(lines.joined(separator: "\n").utf8).write(to: url, options: .atomic)
     }
 
-    private static func readTranscript(_ directory: URL) -> [MeetingTranscriptLine] {
+    private static func readTranscript(
+        _ directory: URL,
+        speakerNames: [String: String],
+        speakerOverrides: [Int: String]
+    ) -> [MeetingTranscriptLine] {
         let url = directory.appendingPathComponent("transcript.json")
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(TranscriptFile.self, from: data)
@@ -323,10 +356,92 @@ enum MeetingLibraryReader {
             MeetingTranscriptLine(
                 id: index,
                 startMilliseconds: segment.start_ms,
-                speaker: displaySpeaker(segment.speaker),
-                text: segment.text
+                speaker: speakerOverrides[index] ?? speakerNames[segment.speaker] ?? displaySpeaker(segment.speaker),
+                text: segment.text,
+                rawSpeaker: segment.speaker
             )
         }
+    }
+
+    private static func readSpeakerNames(_ directory: URL) -> [String: String] {
+        let url = directory.appendingPathComponent("speaker-names.json")
+        guard let data = try? Data(contentsOf: url),
+              let names = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return names
+    }
+
+    private static func readSpeakerOverrides(_ directory: URL) -> [Int: String] {
+        let url = directory.appendingPathComponent("speaker-overrides.json")
+        guard let data = try? Data(contentsOf: url),
+              let values = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return values.reduce(into: [Int: String]()) { result, pair in
+            if let index = Int(pair.key) { result[index] = pair.value }
+        }
+    }
+
+    static func saveSpeakerNames(_ names: [String: String], for meeting: MeetingRecord) throws {
+        guard !meeting.isDemo else { return }
+        let cleaned = names.reduce(into: [String: String]()) { result, pair in
+            let value = pair.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { result[pair.key] = value }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(cleaned).write(
+            to: meeting.directory.appendingPathComponent("speaker-names.json"),
+            options: .atomic
+        )
+        try rewriteTranscriptMarkdown(
+            for: meeting,
+            names: cleaned,
+            overrides: meeting.speakerOverrides
+        )
+    }
+
+    static func saveSpeakerOverrides(_ overrides: [Int: String], for meeting: MeetingRecord) throws {
+        guard !meeting.isDemo else { return }
+        let cleaned = overrides.reduce(into: [String: String]()) { result, pair in
+            let value = pair.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { result[String(pair.key)] = value }
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(cleaned).write(
+            to: meeting.directory.appendingPathComponent("speaker-overrides.json"),
+            options: .atomic
+        )
+        try rewriteTranscriptMarkdown(
+            for: meeting,
+            names: meeting.speakerNames,
+            overrides: cleaned.reduce(into: [Int: String]()) { result, pair in
+                if let index = Int(pair.key) { result[index] = pair.value }
+            }
+        )
+    }
+
+    private static func rewriteTranscriptMarkdown(
+        for meeting: MeetingRecord,
+        names: [String: String],
+        overrides: [Int: String]
+    ) throws {
+        let url = meeting.directory.appendingPathComponent("transcript.json")
+        guard let data = try? Data(contentsOf: url),
+              let file = try? JSONDecoder().decode(TranscriptFile.self, from: data)
+        else { return }
+        var lines = ["# \(meeting.title)", "", "## Transcript", ""]
+        for (index, segment) in file.segments.enumerated() {
+            let speaker = overrides[index] ?? names[segment.speaker] ?? displaySpeaker(segment.speaker)
+            let total = segment.start_ms / 1_000
+            let stamp = String(format: "%02d:%02d", total / 60, total % 60)
+            lines.append("**[\(stamp)] \(speaker):** \(segment.text)")
+            lines.append("")
+        }
+        try Data(lines.joined(separator: "\n").utf8).write(
+            to: meeting.directory.appendingPathComponent("transcript.md"),
+            options: .atomic
+        )
     }
 
     private static func readActionState(_ directory: URL) -> Set<Int> {
@@ -429,9 +544,16 @@ final class ScribeAppModel: ObservableObject {
     @Published var recordingElapsed = "0:00"
     @Published var transcriptionStatus: String?
     @Published var showSettings = false
+    @Published var showModelManager = false
     @Published var showOnboarding = false
     @Published var showNotesEditor = false
     @Published var showRenameEditor = false
+    @Published var showSpeakerEditor = false
+    @Published var showAssistant = false
+    @Published var showAISettings = false
+    @Published var showOrganizer = false
+    @Published var showFollowUp = false
+    @Published var showDecisionLog = false
     @Published var showDeleteConfirmation = false
     @Published var regeneratingMeetingID: String?
     @Published var alertMessage: String?
@@ -443,10 +565,14 @@ final class ScribeAppModel: ObservableObject {
     @Published private(set) var enabledBundleIDs: Set<String>
     @Published private(set) var launchAtLogin: Bool
     @Published private(set) var noteStyle: MeetingNoteStyle
+    @Published private(set) var transcriptionModel: LocalTranscriptionModel
+    @Published private(set) var aiSettings: ScribeAISettings
+    @Published var downloadingModelID: String?
 
     var onToggleRecording: (() -> Void)?
     var onChooseRecordingsFolder: (() -> Void)?
-    var onDownloadTranscriptionModel: (() -> Void)?
+    var onCheckForUpdates: (() -> Void)?
+    var onDownloadTranscriptionModel: ((LocalTranscriptionModel) -> Void)?
 
     private let demo: Bool
     private var playback = MeetingPlaybackController()
@@ -460,6 +586,8 @@ final class ScribeAppModel: ObservableObject {
         enabledBundleIDs = Config.callAppBundleIDs()
         launchAtLogin = SMAppService.mainApp.status == .enabled
         noteStyle = Config.noteStyle()
+        transcriptionModel = .selected
+        aiSettings = Config.aiSettings()
         showOnboarding = !demo && !UserDefaults.standard.bool(forKey: "scribe.onboarding.complete")
         refresh()
     }
@@ -573,6 +701,53 @@ final class ScribeAppModel: ObservableObject {
         if shouldRefresh { regenerateSelectedNote() }
     }
 
+    func saveSpeakerNames(_ names: [String: String]) {
+        saveSpeakerDetails(names: names, overrides: selectedMeeting?.speakerOverrides ?? [:])
+    }
+
+    func saveSpeakerDetails(names: [String: String], overrides: [Int: String]) {
+        guard let index = meetings.firstIndex(where: { $0.id == selectedMeetingID }) else { return }
+        do {
+            if meetings[index].isDemo {
+                meetings[index].speakerNames = names
+                meetings[index].speakerOverrides = overrides
+                meetings[index].transcript = meetings[index].transcript.map { line in
+                    MeetingTranscriptLine(
+                        id: line.id,
+                        startMilliseconds: line.startMilliseconds,
+                        speaker: overrides[line.id] ?? names[line.rawSpeaker] ?? line.speaker,
+                        text: line.text,
+                        rawSpeaker: line.rawSpeaker
+                    )
+                }
+            } else {
+                try MeetingLibraryReader.saveSpeakerNames(names, for: meetings[index])
+                var updated = meetings[index]
+                updated.speakerNames = names
+                try MeetingLibraryReader.saveSpeakerOverrides(overrides, for: updated)
+                refresh()
+            }
+            showSpeakerEditor = false
+        } catch {
+            alertMessage = "Scribe couldn’t save speaker names: \(error.localizedDescription)"
+        }
+    }
+
+    func saveWorkspace(_ workspace: MeetingWorkspace) {
+        guard let index = meetings.firstIndex(where: { $0.id == selectedMeetingID }) else { return }
+        do {
+            if meetings[index].isDemo {
+                meetings[index].workspace = workspace
+            } else {
+                try MeetingWorkspaceStore.save(workspace, for: meetings[index])
+                refresh()
+            }
+            showOrganizer = false
+        } catch {
+            alertMessage = "Scribe couldn’t organize this meeting: \(error.localizedDescription)"
+        }
+    }
+
     func renameSelectedMeeting(to proposedTitle: String) {
         guard let index = meetings.firstIndex(where: { $0.id == selectedMeetingID }) else { return }
         do {
@@ -646,6 +821,17 @@ final class ScribeAppModel: ObservableObject {
         }
     }
 
+    func playSelectedMeeting(at milliseconds: Int) {
+        guard let meeting = selectedMeeting, !meeting.isDemo else { return }
+        do {
+            try playback.play(meeting: meeting, at: TimeInterval(milliseconds) / 1_000)
+            playingMeetingID = meeting.id
+        } catch {
+            playingMeetingID = nil
+            alertMessage = "Scribe couldn’t play this recording: \(error.localizedDescription)"
+        }
+    }
+
     func setPromptForCalls(_ enabled: Bool) {
         promptForCalls = enabled
         persist { $0.promptForCalls = enabled }
@@ -661,9 +847,69 @@ final class ScribeAppModel: ObservableObject {
         }
     }
 
+    func selectTranscriptionModel(_ selected: LocalTranscriptionModel) {
+        transcriptionModel = selected
+        persist {
+            var value = $0.transcription ?? .init()
+            value.enabled = value.enabled ?? true
+            value.engine = "parakeet"
+            value.model = selected.rawValue
+            $0.transcription = value
+        }
+    }
+
+    func downloadTranscriptionModel(_ selected: LocalTranscriptionModel) {
+        guard downloadingModelID == nil else { return }
+        downloadingModelID = selected.id
+        transcriptionStatus = "Downloading \(selected.title)…"
+        onDownloadTranscriptionModel?(selected)
+    }
+
+    func finishModelDownload(_ selected: LocalTranscriptionModel, error: String? = nil) {
+        downloadingModelID = nil
+        if let error {
+            transcriptionStatus = nil
+            alertMessage = "Model download failed. \(error)"
+        } else {
+            selectTranscriptionModel(selected)
+            transcriptionStatus = "\(selected.title) ready"
+            objectWillChange.send()
+        }
+    }
+
     func setNoteStyle(_ style: MeetingNoteStyle) {
         noteStyle = style
         persist { $0.noteStyle = style.rawValue }
+    }
+
+    func saveAISettings(_ settings: ScribeAISettings, apiKey: String) {
+        do {
+            if settings.provider.needsAPIKey {
+                try ScribeKeychain.saveAPIKey(apiKey, provider: settings.provider)
+            }
+            aiSettings = settings
+            persist {
+                $0.intelligence = .init(
+                    provider: settings.provider.rawValue,
+                    model: settings.model,
+                    baseURL: settings.baseURL,
+                    redactSensitive: settings.redactSensitive
+                )
+            }
+            showAISettings = false
+        } catch {
+            alertMessage = "Scribe couldn’t save the AI connection: \(error.localizedDescription)"
+        }
+    }
+
+    func copyAIContext() {
+        let scoped = selectedMeeting.map { [$0] } ?? []
+        guard !scoped.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(
+            ScribeMeetingAssistant.contextText(scoped, redact: aiSettings.redactSensitive),
+            forType: .string
+        )
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) {
@@ -700,11 +946,10 @@ final class ScribeAppModel: ObservableObject {
     }
 
     func modelStatusText() -> String {
-        let check = DoctorReport.checkTranscription()
-        switch check.status {
-        case .ok: return "Ready for local transcription"
-        case .warn(let message), .fail(let message): return message
-        }
+        if downloadingModelID != nil { return transcriptionStatus ?? "Downloading…" }
+        return transcriptionModel.isInstalled
+            ? "\(transcriptionModel.title) · installed"
+            : "\(transcriptionModel.title) · download required"
     }
 
     func openPrivacySettings(_ pane: String) {
@@ -744,7 +989,7 @@ final class ScribeAppModel: ObservableObject {
 private final class MeetingPlaybackController {
     private var players: [AVAudioPlayer] = []
 
-    func play(meeting: MeetingRecord) throws {
+    func play(meeting: MeetingRecord, at offset: TimeInterval = 0) throws {
         stop()
         let files = ["mic.caf", "system.caf"]
             .map { meeting.directory.appendingPathComponent($0) }
@@ -753,7 +998,10 @@ private final class MeetingPlaybackController {
             throw CocoaError(.fileNoSuchFile)
         }
         players = try files.map { try AVAudioPlayer(contentsOf: $0) }
-        players.forEach { $0.prepareToPlay() }
+        players.forEach {
+            $0.prepareToPlay()
+            $0.currentTime = min(max(0, offset), $0.duration)
+        }
         let start = players.map(\.deviceCurrentTime).max() ?? 0
         players.forEach { $0.play(atTime: start + 0.05) }
     }

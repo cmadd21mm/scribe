@@ -13,9 +13,15 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.2.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/cmadd21mm/scribe/releases/latest/download/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+    <key>SUPublicEDKey</key>
+    <string>00GSPXoawjGyq4Z02R0mvfD/dA1XYvxYeH/TY62VioE=</string>
     <key>CFBundleIconFile</key>
     <string>Scribe.icns</string>
     <key>LSMinimumSystemVersion</key>

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0
+
+- Rebuilt Settings rows with consistent icon/text alignment, explicit colors,
+  and pointer cursors; replaced the misleading model button with a functional
+  model manager.
+- Added English, multilingual, and compact local transcription model choices
+  with selected, installed, downloading, and failure states.
+- Added persistent speaker track names plus per-moment corrections, and made
+  transcript timestamps play from the cited moment.
+- Added Ask Scribe across one meeting, a project, or the whole library. Local
+  cited retrieval is the default; optional Venice, OpenAI, Claude, Grok, and
+  OpenAI-compatible connections store API keys in Keychain and redact common
+  contact details by default.
+- Added project, people, and tag organization; a cross-meeting decision log;
+  and editable recap, status, agenda, and task drafts that never send
+  automatically.
+- Added signed Sparkle updates through GitHub Releases with a Check for Updates
+  button in Settings, the app menu, and the menu-bar menu.
+- Added 28 automated tests and new native visual-regression screens for model
+  and intelligence settings.
+
 ## 0.1.0
 
 - Native Scribe meeting library with search, work-and-life sample content,

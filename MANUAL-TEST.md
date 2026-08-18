@@ -8,7 +8,8 @@ macOS 15+ with headphones first, then repeat one call on speakers with
 ## 1. One-time setup
 
 1. Run `swift test` and `swift build -c release`.
-2. Run `sh scripts/check-no-runtime-network.sh`.
+2. Run `sh scripts/check-no-runtime-network.sh` and confirm only explicit model
+   download and user-invoked AI paths are allowed.
 3. Install `.build/release/scribe` and run `scribe models download-transcription`.
 4. Run `scribe doctor`; resolve any hard failure.
 5. Start `scribe run` and confirm a feather appears in the menu bar.
@@ -168,3 +169,26 @@ the remote participant belongs in `system.caf`.
    `recover`, `doctor`, and `quit`.
 2. Confirm each command acts only on local processes/files and that menu-bar
    start/stop results match CLI start/stop results.
+
+## 19. Models, speaker corrections, and intelligence
+
+1. Open Settings → Manage models. Confirm every row has a working Download or
+   Use action, and the active installed model says Selected.
+2. Name the microphone and call tracks, correct one individual transcript
+   moment, relaunch Scribe, and confirm both changes persist in the UI and
+   `transcript.md`.
+3. Ask a question locally and confirm cited timestamps are playable. Organize
+   two meetings under the same project and confirm project-scoped Ask Scribe
+   searches both.
+4. Connect a test AI provider, confirm its key is in Keychain rather than the
+   config file, ask one question, and verify that no request occurs before Ask.
+5. Draft each follow-up format. Confirm the output is editable and nothing is
+   sent until copied and pasted elsewhere.
+
+## 20. Signed updates
+
+1. Install an older Developer-ID-signed build in Applications.
+2. Publish a newer notarized DMG and signed `appcast.xml` to its GitHub release.
+3. Choose Scribe → Check for Updates…, install it, and confirm the new version
+   replaces the old copy without deleting local meetings or preferences.
+4. Modify the DMG after appcast signing and confirm Sparkle rejects it.

@@ -4,6 +4,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
     struct Transcription: Codable, Equatable, Sendable {
         var enabled: Bool? = nil
         var engine: String? = nil
+        var model: String? = nil
     }
 
     struct Summarization: Codable, Equatable, Sendable {
@@ -19,6 +20,19 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
         }
     }
 
+    struct Intelligence: Codable, Equatable, Sendable {
+        var provider: String? = nil
+        var model: String? = nil
+        var baseURL: String? = nil
+        var redactSensitive: Bool? = nil
+
+        enum CodingKeys: String, CodingKey {
+            case provider, model
+            case baseURL = "base_url"
+            case redactSensitive = "redact_sensitive"
+        }
+    }
+
     var recordingsDir: String? = nil
     var transcription: Transcription? = nil
     var summarization: Summarization? = nil
@@ -29,6 +43,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
     var minimumFreeDiskGB: Double? = nil
     var promptForCalls: Bool? = nil
     var noteStyle: String? = nil
+    var intelligence: Intelligence? = nil
 
     enum CodingKeys: String, CodingKey {
         case recordingsDir = "recordings_dir"
@@ -40,6 +55,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
         case minimumFreeDiskGB = "minimum_free_disk_gb"
         case promptForCalls = "prompt_for_calls"
         case noteStyle = "note_style"
+        case intelligence
     }
 }
 
@@ -87,6 +103,10 @@ enum Config {
         load()?.transcription?.engine ?? "parakeet"
     }
 
+    static func transcriptionModelID() -> String {
+        load()?.transcription?.model ?? LocalTranscriptionModel.english.rawValue
+    }
+
     static func micVoiceProcessing() -> Bool {
         load()?.micVoiceProcessing ?? false
     }
@@ -110,6 +130,17 @@ enum Config {
 
     static func noteStyle() -> MeetingNoteStyle {
         load()?.noteStyle.flatMap(MeetingNoteStyle.init(rawValue:)) ?? .balanced
+    }
+
+    static func aiSettings() -> ScribeAISettings {
+        let value = load()?.intelligence
+        let provider = value?.provider.flatMap(ScribeAIProvider.init(rawValue:)) ?? .local
+        return ScribeAISettings(
+            provider: provider,
+            model: value?.model ?? "",
+            baseURL: value?.baseURL ?? provider.defaultBaseURL,
+            redactSensitive: value?.redactSensitive ?? true
+        )
     }
 
     static func minimumFreeDiskBytes() -> Int64 {

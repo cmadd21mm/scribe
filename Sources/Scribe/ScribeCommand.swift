@@ -31,6 +31,8 @@ private enum DemoSnapshotScreen: String, ExpressibleByArgument {
     case library
     case rename
     case settings
+    case models
+    case intelligence
     case onboarding
 }
 
@@ -43,7 +45,7 @@ struct DemoSnapshot: AsyncParsableCommand {
     @Option(name: .long, help: "PNG output path.")
     var output: String = "scribe-demo.png"
 
-    @Option(name: .long, help: "Screen to render: library, rename, settings, or onboarding.")
+    @Option(name: .long, help: "Screen to render: library, rename, settings, models, intelligence, or onboarding.")
     private var screen: DemoSnapshotScreen = .library
 
     func run() async throws {
@@ -65,6 +67,12 @@ struct DemoSnapshot: AsyncParsableCommand {
         case .settings:
             size = CGSize(width: 680, height: 760)
             selectedView = AnyView(ScribeSettingsView(model: model))
+        case .models:
+            size = CGSize(width: 610, height: 490)
+            selectedView = AnyView(ScribeModelManagerView(model: model))
+        case .intelligence:
+            size = CGSize(width: 610, height: 390)
+            selectedView = AnyView(ScribeAISettingsView(model: model))
         case .onboarding:
             size = CGSize(width: 760, height: 570)
             selectedView = AnyView(ScribeOnboardingView(model: model))
@@ -171,6 +179,7 @@ final class AppController {
     private let model: ScribeAppModel
     private let windowController: ScribeWindowController
     private let mainMenu: ScribeMainMenu
+    private let updater: ScribeUpdater
     private let transcription = TranscriptionCoordinator()
     private let calendar = CalendarService()
     private var session: RecordingSession?
@@ -190,23 +199,29 @@ final class AppController {
         model = ScribeAppModel(root: root, demo: demo)
         windowController = ScribeWindowController(model: model, demo: demo)
         mainMenu = ScribeMainMenu()
+        updater = ScribeUpdater()
 
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onOpenApp = { [weak self] in self?.windowController.present() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onSettings = { [weak self] in self?.openSettings() }
+        menuBar.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
 
         mainMenu.onToggleRecording = { [weak self] in self?.toggle() }
         mainMenu.onOpenFolder = { [weak self] in self?.openFolder() }
         mainMenu.onOpenSettings = { [weak self] in self?.openSettings() }
+        mainMenu.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
         mainMenu.onQuit = { [weak self] in self?.shutdown() }
         mainMenu.install()
 
         model.onToggleRecording = { [weak self] in self?.toggle() }
         model.onChooseRecordingsFolder = { [weak self] in self?.chooseRecordingsFolder() }
-        model.onDownloadTranscriptionModel = { [weak self] in self?.downloadTranscriptionModel() }
+        model.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
+        model.onDownloadTranscriptionModel = { [weak self] selected in
+            self?.downloadTranscriptionModel(selected)
+        }
         windowController.present()
 
         guard !demo else { return }
@@ -476,17 +491,15 @@ final class AppController {
         }
     }
 
-    private func downloadTranscriptionModel() {
-        model.transcriptionStatus = "Downloading local model…"
+    private func downloadTranscriptionModel(_ selected: LocalTranscriptionModel) {
         let executable = URL(fileURLWithPath: CommandLine.arguments.first ?? "scribe")
         Task { [weak self] in
-            let result = await Self.runModelDownload(executable: executable)
+            let result = await Self.runModelDownload(executable: executable, model: selected)
             guard let self else { return }
             if result.status == 0 {
-                model.transcriptionStatus = "Local model ready"
+                model.finishModelDownload(selected)
             } else {
-                model.transcriptionStatus = nil
-                model.alertMessage = "Model download failed. \(result.output)"
+                model.finishModelDownload(selected, error: result.output)
             }
         }
     }
@@ -497,12 +510,13 @@ final class AppController {
     }
 
     nonisolated private static func runModelDownload(
-        executable: URL
+        executable: URL,
+        model: LocalTranscriptionModel
     ) async -> ModelDownloadResult {
         await Task.detached {
             let process = Process()
             process.executableURL = executable
-            process.arguments = ["models", "download-transcription"]
+            process.arguments = ["models", "download-transcription", "--model", model.rawValue]
             let pipe = Pipe()
             process.standardOutput = pipe
             process.standardError = pipe
