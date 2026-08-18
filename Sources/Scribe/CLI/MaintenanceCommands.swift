@@ -38,6 +38,25 @@ struct RegenerateNote: AsyncParsableCommand {
     }
 }
 
+struct SetMeetingSource: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "set-source",
+        abstract: "Correct the displayed source for an existing local meeting."
+    )
+
+    @Argument(help: "Meeting directory containing meta.json.")
+    var directory: String
+
+    @Option(name: .long, help: "Source name, such as Google Meet, Zoom, or In person.")
+    var name: String
+
+    func run() throws {
+        let dir = URL(fileURLWithPath: (directory as NSString).expandingTildeInPath)
+        try MeetingLibraryReader.setSourceName(name, for: dir)
+        print("meeting source updated to \(name)")
+    }
+}
+
 struct RecoverSessions: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "recover",

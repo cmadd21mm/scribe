@@ -11,6 +11,9 @@ final class RecordingSession: @unchecked Sendable {
 
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
+    private var sourceBundleID: String?
+    private var captureKind = "unknown"
+    private var capturesSystemAudio = false
 
     private var watchdog: Timer?
     private var trackSize: [String: Int64] = [:]
@@ -23,6 +26,7 @@ final class RecordingSession: @unchecked Sendable {
     /// collision) without starting capture yet.
     init(root: URL, context: MeetingContext) throws {
         self.context = context
+        sourceBundleID = context.sourceBundleID
         let base = MeetingFolderNamer.name(startedAt: startedAt, title: context.title)
         var candidate = root.appendingPathComponent(base, isDirectory: true)
         var n = 2
@@ -44,16 +48,36 @@ final class RecordingSession: @unchecked Sendable {
             from: processes,
             allowedBundleIDs: allowedBundleIDs
         )
+        if sourceBundleID == nil {
+            let activeBundleIDs = Set(targets.compactMap(\.bundleID))
+            if activeBundleIDs.count == 1 { sourceBundleID = activeBundleIDs.first }
+        }
+        guard !targets.isEmpty else {
+            captureKind = "in_person"
+            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
+            try? writeMetadata(state: "recording", endedAt: nil)
+            startWatchdog()
+            return
+        }
+
+        captureKind = "online"
         try system.start(
             writingTo: dir.appendingPathComponent("system.caf"),
             processObjectIDs: targets.map(\.objectID)
         )
+        capturesSystemAudio = true
         do {
             try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
         } catch {
             system.stop()
+            capturesSystemAudio = false
             throw error
         }
+        try? writeMetadata(state: "recording", endedAt: nil)
+        startWatchdog()
+    }
+
+    private func startWatchdog() {
         watchdog = Timer.scheduledTimer(
             withTimeInterval: Self.watchdogInterval,
             repeats: true
@@ -93,6 +117,8 @@ final class RecordingSession: @unchecked Sendable {
         startOffsets: [String: Int] = ["mic": 0, "system": 0]
     ) throws {
         let iso = ISO8601DateFormatter()
+        var files = ["mic": "mic.caf"]
+        if capturesSystemAudio || captureKind == "unknown" { files["system"] = "system.caf" }
         let meta: [String: Any] = [
             "schema_version": 1,
             "state": state,
@@ -102,8 +128,9 @@ final class RecordingSession: @unchecked Sendable {
             "title": context.title,
             "attendees": context.attendees,
             "calendar_event_id": context.calendarEventID ?? NSNull(),
-            "source_bundle_id": context.sourceBundleID ?? NSNull(),
-            "files": ["mic": "mic.caf", "system": "system.caf"],
+            "source_bundle_id": sourceBundleID ?? NSNull(),
+            "capture_kind": captureKind,
+            "files": files,
             "start_offset_ms": startOffsets,
         ]
         let data = try JSONSerialization.data(

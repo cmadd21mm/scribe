@@ -17,6 +17,7 @@ struct ScribeCommand: AsyncParsableCommand {
             ListAudioApps.self,
             TranscribeSession.self,
             RegenerateNote.self,
+            SetMeetingSource.self,
             RecoverSessions.self,
             Models.self,
             Doctor.self,

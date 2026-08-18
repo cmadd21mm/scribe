@@ -470,6 +470,7 @@ struct ScribeAISettingsView: View {
     @State private var usesManualModelEntry = false
     @State private var modelRequestID = UUID()
     @State private var modelLoadTask: Task<Void, Never>?
+    @State private var keySaveMessage: String?
 
     init(model: ScribeAppModel, onClose: (() -> Void)? = nil) {
         self.model = model
@@ -523,6 +524,7 @@ struct ScribeAISettingsView: View {
                     modelLoadTask?.cancel()
                     modelLoadTask = nil
                     isLoadingModels = false
+                    keySaveMessage = nil
                 }
 
                 if provider == .local {
@@ -536,17 +538,28 @@ struct ScribeAISettingsView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 7) {
                         fieldLabel(provider.needsAPIKey ? "API key" : "API key (optional)")
-                        SecureField("Stored in your Mac Keychain", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .onChange(of: apiKey) { _, _ in
-                                availableModels = []
-                                modelSearch = ""
-                                modelLoadError = nil
-                                modelRequestID = UUID()
-                                modelLoadTask?.cancel()
-                                modelLoadTask = nil
-                                isLoadingModels = false
-                            }
+                        HStack(spacing: 9) {
+                            SecureField("Stored in your Mac Keychain", text: $apiKey)
+                                .textFieldStyle(.roundedBorder)
+                                .onChange(of: apiKey) { _, _ in
+                                    availableModels = []
+                                    modelSearch = ""
+                                    modelLoadError = nil
+                                    keySaveMessage = nil
+                                    modelRequestID = UUID()
+                                    modelLoadTask?.cancel()
+                                    modelLoadTask = nil
+                                    isLoadingModels = false
+                                }
+                            Button("Save key") { saveKey() }
+                                .buttonStyle(ScribeSecondaryButtonStyle())
+                                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        if let keySaveMessage {
+                            Label(keySaveMessage, systemImage: "checkmark.shield")
+                                .font(ScribeTheme.sans(9))
+                                .foregroundStyle(ScribeTheme.mutedInk)
+                        }
                     }
                     VStack(alignment: .leading, spacing: 7) {
                         fieldLabel("API address")
@@ -588,7 +601,7 @@ struct ScribeAISettingsView: View {
                         .foregroundStyle(ScribeTheme.faintInk)
                     Spacer()
                     Button("Save") {
-                        model.saveAISettings(
+                        let saved = model.saveAISettings(
                             ScribeAISettings(
                                 provider: provider,
                                 model: modelName.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -597,11 +610,10 @@ struct ScribeAISettingsView: View {
                             ),
                             apiKey: apiKey
                         )
-                        onClose?()
+                        if saved { onClose?() }
                     }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
-                    .disabled(provider != .local && modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
             .padding(24)
@@ -725,10 +737,12 @@ struct ScribeAISettingsView: View {
                 HStack(spacing: 10) {
                     Button("Load available models") { loadModels() }
                         .buttonStyle(ScribeSecondaryButtonStyle())
-                        .disabled(provider.needsAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Text(provider.needsAPIKey && apiKey.isEmpty
+                        .disabled(provider.needsAPIKey && provider != .venice && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    Text(provider.needsAPIKey && provider != .venice && apiKey.isEmpty
                          ? "Enter your API key first."
-                         : "Scribe will ask \(provider.title) which models this account can use.")
+                         : provider == .venice
+                            ? "Venice publishes this list without exposing your saved key."
+                            : "Scribe will ask \(provider.title) which models this account can use.")
                         .font(ScribeTheme.sans(10))
                         .foregroundStyle(ScribeTheme.mutedInk)
                 }
@@ -797,8 +811,16 @@ struct ScribeAISettingsView: View {
             } catch {
                 guard modelRequestID == requestID else { return }
                 guard !Task.isCancelled else { return }
-                availableModels = []
-                modelLoadError = error.localizedDescription
+                if requestedProvider == .venice {
+                    availableModels = ScribeAIModelCatalog.veniceFallbackModels
+                    if modelName.isEmpty {
+                        modelName = ScribeAIModelCatalog.veniceFallbackModels.first?.id ?? ""
+                    }
+                    modelLoadError = "Venice’s live catalog did not respond. Showing a small verified fallback list; Refresh will retry."
+                } else {
+                    availableModels = []
+                    modelLoadError = error.localizedDescription
+                }
             }
             guard modelRequestID == requestID else { return }
             isLoadingModels = false
@@ -811,6 +833,19 @@ struct ScribeAISettingsView: View {
         modelLoadTask?.cancel()
         modelLoadTask = nil
         isLoadingModels = false
+    }
+
+    private func saveKey() {
+        do {
+            try ScribeKeychain.saveAPIKey(
+                apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
+                provider: provider
+            )
+            keySaveMessage = "Saved securely in Keychain."
+        } catch {
+            keySaveMessage = nil
+            model.alertMessage = "Scribe couldn’t save this API key: \(error.localizedDescription)"
+        }
     }
 
     private func close() {
