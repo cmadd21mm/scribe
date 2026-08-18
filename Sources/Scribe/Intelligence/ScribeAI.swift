@@ -121,6 +121,35 @@ enum ScribeAIModelCatalog {
         session: URLSession = .shared
     ) async throws -> [ScribeAIModelOption] {
         guard provider != .local else { return [] }
+        var request = try modelListRequest(
+            provider: provider,
+            baseURL: baseURL,
+            apiKey: apiKey,
+            authenticateVenice: false
+        )
+        var (data, response) = try await session.data(for: request)
+        if provider == .venice,
+           let http = response as? HTTPURLResponse,
+           [401, 403].contains(http.statusCode),
+           !apiKey.isEmpty {
+            request = try modelListRequest(
+                provider: provider,
+                baseURL: baseURL,
+                apiKey: apiKey,
+                authenticateVenice: true
+            )
+            (data, response) = try await session.data(for: request)
+        }
+        return try models(from: data, response: response, provider: provider)
+    }
+
+    static func modelListRequest(
+        provider: ScribeAIProvider,
+        baseURL: String,
+        apiKey: String,
+        authenticateVenice: Bool = false
+    ) throws -> URLRequest {
+        guard provider != .local else { throw ScribeAIError.invalidEndpoint }
         let resolvedBaseURL = baseURL.isEmpty ? provider.defaultBaseURL : baseURL
         let trimmedBaseURL = resolvedBaseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let suffix: String
@@ -134,7 +163,7 @@ enum ScribeAIModelCatalog {
         case .openAI, .custom:
             suffix = "/models"
         case .local:
-            return []
+            throw ScribeAIError.invalidEndpoint
         }
         guard let url = URL(string: trimmedBaseURL + suffix) else {
             throw ScribeAIError.invalidEndpoint
@@ -142,15 +171,22 @@ enum ScribeAIModelCatalog {
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 12
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if provider == .claude {
             request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        } else if !apiKey.isEmpty {
+        } else if !apiKey.isEmpty && (provider != .venice || authenticateVenice) {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        return request
+    }
 
-        let (data, response) = try await session.data(for: request)
+    private static func models(
+        from data: Data,
+        response: URLResponse,
+        provider: ScribeAIProvider
+    ) throws -> [ScribeAIModelOption] {
         guard let http = response as? HTTPURLResponse else {
             throw ScribeAIError.invalidResponse
         }
