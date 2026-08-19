@@ -104,13 +104,32 @@ enum NotePipeline {
         )) ?? ""
         let rendered: String
         if let explicitSummarizer {
-            let note = try await explicitSummarizer.summarize(SummarizationRequest(
-                title: context.title,
-                attendees: context.attendees,
-                transcriptMarkdown: transcriptMarkdown,
-                userNotes: userNotes,
-                style: Config.noteStyle()
-            ))
+            let startedAt = Date()
+            let note: StructuredMeetingNote
+            do {
+                note = try await explicitSummarizer.summarize(SummarizationRequest(
+                    title: context.title,
+                    attendees: context.attendees,
+                    transcriptMarkdown: transcriptMarkdown,
+                    userNotes: userNotes,
+                    style: Config.noteStyle()
+                ))
+                SummaryAttemptLog.append(
+                    sessionDir: sessionDir,
+                    backendName: explicitSummarizer.backendName,
+                    startedAt: startedAt,
+                    result: "success"
+                )
+            } catch {
+                SummaryAttemptLog.append(
+                    sessionDir: sessionDir,
+                    backendName: explicitSummarizer.backendName,
+                    startedAt: startedAt,
+                    result: "failed",
+                    error: error
+                )
+                throw error
+            }
             rendered = NoteRenderer.render(
                 context: context,
                 note: note,
@@ -164,5 +183,46 @@ enum NotePipeline {
             calendarEventID: metadata["calendar_event_id"] as? String,
             sourceBundleID: metadata["source_bundle_id"] as? String
         )
+    }
+}
+
+enum SummaryAttemptLog {
+    static func append(
+        sessionDir: URL,
+        backendName: String,
+        startedAt: Date,
+        result: String,
+        error: Error? = nil
+    ) {
+        let elapsed = Date().timeIntervalSince(startedAt)
+        var fields = [
+            ISO8601DateFormatter().string(from: Date()),
+            "backend=\(oneLine(backendName))",
+            "result=\(oneLine(result))",
+            String(format: "seconds=%.2f", elapsed),
+        ]
+        if let error {
+            fields.append("error=\(oneLine(error.localizedDescription))")
+        }
+        let line = fields.joined(separator: " ") + "\n"
+        let url = sessionDir.appendingPathComponent("summary.log")
+        if let handle = FileHandle(forWritingAtPath: url.path) {
+            do {
+                try handle.seekToEnd()
+                try handle.write(contentsOf: Data(line.utf8))
+                try handle.close()
+            } catch {
+                try? handle.close()
+            }
+        } else {
+            try? Data(line.utf8).write(to: url, options: .atomic)
+        }
+    }
+
+    private static func oneLine(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "=", with: ":")
     }
 }

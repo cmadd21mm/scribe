@@ -596,6 +596,9 @@ final class ScribeAppModel: ObservableObject {
     @Published var showDecisionLog = false
     @Published var showDeleteConfirmation = false
     @Published var regeneratingMeetingID: String?
+    @Published var summaryGenerationElapsedSeconds = 0
+    @Published var summaryFailureMeetingID: String?
+    @Published var summaryFailureMessage: String?
     @Published var alertMessage: String?
     @Published var playingMeetingID: String?
     @Published private(set) var root: URL
@@ -617,6 +620,7 @@ final class ScribeAppModel: ObservableObject {
 
     private let demo: Bool
     private var playback = MeetingPlaybackController()
+    private var summaryProgressTask: Task<Void, Never>?
 
     init(root: URL, demo: Bool) {
         self.root = root
@@ -656,6 +660,10 @@ final class ScribeAppModel: ObservableObject {
                 ?? aiSettings.model
         }
         return "\(aiSettings.provider.title) · \(aiSettings.model)"
+    }
+
+    func summaryFailure(for meetingID: String) -> String? {
+        summaryFailureMeetingID == meetingID ? summaryFailureMessage : nil
     }
 
     func refresh(preservingSelection: Bool = true) {
@@ -852,6 +860,17 @@ final class ScribeAppModel: ObservableObject {
             return
         }
         regeneratingMeetingID = meeting.id
+        summaryGenerationElapsedSeconds = 0
+        summaryFailureMeetingID = nil
+        summaryFailureMessage = nil
+        summaryProgressTask?.cancel()
+        summaryProgressTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, self.regeneratingMeetingID == meeting.id else { return }
+                self.summaryGenerationElapsedSeconds += 1
+            }
+        }
         Task {
             do {
                 let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
@@ -866,9 +885,15 @@ final class ScribeAppModel: ObservableObject {
                 )
                 refresh()
             } catch {
-                alertMessage = "Scribe couldn’t refresh these notes: \(error.localizedDescription)"
+                let message = error.localizedDescription
+                summaryFailureMeetingID = meeting.id
+                summaryFailureMessage = message
+                alertMessage = "Scribe couldn’t refresh these notes: \(message)"
             }
+            summaryProgressTask?.cancel()
+            summaryProgressTask = nil
             regeneratingMeetingID = nil
+            summaryGenerationElapsedSeconds = 0
         }
     }
 

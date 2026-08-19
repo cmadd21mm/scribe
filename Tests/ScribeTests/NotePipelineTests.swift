@@ -17,6 +17,14 @@ struct NotePipelineTests {
         }
     }
 
+    private struct FailingRemoteSummarizer: MeetingSummarizer {
+        let backendName = "Venice AI · test"
+
+        func summarize(_ request: SummarizationRequest) async throws -> StructuredMeetingNote {
+            throw URLError(.timedOut)
+        }
+    }
+
     @Test("Local model JSON is parsed even when surrounded by chatter")
     func parsesModelOutput() throws {
         let output = """
@@ -86,8 +94,40 @@ struct NotePipelineTests {
         )
 
         let markdown = try String(contentsOf: dir.appendingPathComponent("note.md"), encoding: .utf8)
+        let log = try String(contentsOf: dir.appendingPathComponent("summary.log"), encoding: .utf8)
         #expect(markdown.contains("The team approved the launch plan."))
         #expect(markdown.contains("Generated with Venice AI · kimi-k3"))
         #expect(!markdown.contains("Generated locally with Venice"))
+        #expect(log.contains("backend=Venice AI · kimi-k3"))
+        #expect(log.contains("result=success"))
+        #expect(!log.contains("We approved the Friday launch"))
+    }
+
+    @Test("A failed remote summary is logged without replacing the prior note")
+    func failedRemoteSummaryKeepsPriorNote() async throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-failed-note-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(#"{"title":"Long interview"}"#.utf8)
+            .write(to: dir.appendingPathComponent("meta.json"))
+        let prior = "# Long interview\n\n## Summary\n\nPrior validated note."
+        try Data(prior.utf8).write(to: dir.appendingPathComponent("note.md"))
+
+        await #expect(throws: URLError.self) {
+            try await NotePipeline.generate(
+                sessionDir: dir,
+                transcriptMarkdown: "**[00:01] Steve:** A long interview transcript.",
+                summarizer: FailingRemoteSummarizer(),
+                generatedLocally: false
+            )
+        }
+
+        let note = try String(contentsOf: dir.appendingPathComponent("note.md"), encoding: .utf8)
+        let log = try String(contentsOf: dir.appendingPathComponent("summary.log"), encoding: .utf8)
+        #expect(note == prior)
+        #expect(log.contains("result=failed"))
+        #expect(log.contains("error="))
+        #expect(!log.contains("long interview transcript"))
     }
 }

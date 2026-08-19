@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.9
+
+- Added visible elapsed time while a meeting summary is being generated, plus
+  clear guidance for the normal 10–30 second range and 120-second cutoff.
+- Added an inline failure and Try Again state so a transient provider problem
+  cannot look like an indefinite spinner.
+- Added a private per-meeting `summary.log` containing only provider, duration,
+  success, and error metadata—never transcript content or API keys.
+- Verified a full 627-line interview with Venice Kimi K3 Fast in 19 seconds and
+  preserved the prior note until the validated replacement was complete.
+
 ## 0.2.8
 
 - Removed the unconfigured built-in summary state entirely: transcripts remain

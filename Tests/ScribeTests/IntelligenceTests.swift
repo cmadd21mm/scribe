@@ -4,6 +4,11 @@ import Testing
 @testable import Scribe
 
 struct IntelligenceTests {
+    @Test("Remote AI requests allow for variable provider latency")
+    func remoteRequestDeadline() {
+        #expect(ScribeRemoteAIClient.requestTimeoutSeconds == 120)
+    }
+
     @Test("Kimi K3 is available immediately even before Venice catalog refresh")
     func kimiK3Fallback() {
         let models = ScribeAIModelCatalog.veniceFallbackModels

@@ -395,28 +395,46 @@ private struct MeetingDetail: View {
                                 } ?? "The transcript is ready. Connect a separate AI or capable local model to create a reliable summary and action items.")
                                     .font(ScribeTheme.sans(13))
                                     .foregroundStyle(ScribeTheme.mutedInk)
-                                Button {
-                                    if model.configuredSummaryAIName == nil {
-                                        model.showAISettings = true
-                                    } else {
-                                        model.regenerateSelectedNote()
+                                if model.regeneratingMeetingID == meeting.id {
+                                    HStack(spacing: 9) {
+                                        ProgressView().controlSize(.small)
+                                        Text("Asking \(model.configuredSummaryAIName ?? "meeting AI") · \(model.summaryGenerationElapsedSeconds)s")
+                                            .font(ScribeTheme.sans(11, weight: .medium))
+                                            .foregroundStyle(ScribeTheme.ink)
                                     }
-                                } label: {
-                                    Label(
-                                        model.regeneratingMeetingID == meeting.id
-                                            ? "Generating summary…"
-                                            : model.configuredSummaryAIName.map { "Generate with \($0)" }
-                                                ?? "Set up meeting AI…",
-                                        systemImage: model.configuredSummaryAIName == nil ? "gearshape" : "sparkles"
+                                    Text("Most summaries finish in 10–30 seconds. Venice can occasionally take longer; Scribe stops after \(ScribeRemoteAIClient.requestTimeoutSeconds) seconds.")
+                                        .font(ScribeTheme.sans(10))
+                                        .foregroundStyle(ScribeTheme.faintInk)
+                                } else {
+                                    if let failure = model.summaryFailure(for: meeting.id) {
+                                        Label("The last attempt didn’t finish: \(failure)", systemImage: "exclamationmark.triangle")
+                                            .font(ScribeTheme.sans(10))
+                                            .foregroundStyle(ScribeTheme.mutedInk)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Button {
+                                        if model.configuredSummaryAIName == nil {
+                                            model.showAISettings = true
+                                        } else {
+                                            model.regenerateSelectedNote()
+                                        }
+                                    } label: {
+                                        Label(
+                                            model.summaryFailure(for: meeting.id) == nil
+                                                ? model.configuredSummaryAIName.map { "Generate with \($0)" }
+                                                    ?? "Set up meeting AI…"
+                                                : "Try \(model.configuredSummaryAIName ?? "meeting AI") again",
+                                            systemImage: model.configuredSummaryAIName == nil ? "gearshape" : "sparkles"
+                                        )
+                                    }
+                                    .buttonStyle(ScribePrimaryButtonStyle())
+                                    .disabled(
+                                        meeting.isDemo
+                                            || !meeting.hasTranscript
+                                            || meeting.state == "recording"
+                                            || model.regeneratingMeetingID != nil
                                     )
                                 }
-                                .buttonStyle(ScribePrimaryButtonStyle())
-                                .disabled(
-                                    meeting.isDemo
-                                        || !meeting.hasTranscript
-                                        || meeting.state == "recording"
-                                        || model.regeneratingMeetingID != nil
-                                )
                             }
                         } else {
                             VStack(alignment: .leading, spacing: 12) {
@@ -427,7 +445,7 @@ private struct MeetingDetail: View {
                                     .textSelection(.enabled)
                                 Button(
                                     model.regeneratingMeetingID == meeting.id
-                                        ? "Refreshing summary…"
+                                        ? "Refreshing with \(model.configuredSummaryAIName ?? "meeting AI") · \(model.summaryGenerationElapsedSeconds)s"
                                         : model.configuredSummaryAIName.map { "Regenerate with \($0)" }
                                             ?? "Regenerate summary"
                                 ) {
@@ -562,7 +580,7 @@ private struct MeetingDetail: View {
                 }
                 Button(
                     model.regeneratingMeetingID == meeting.id
-                        ? "Refreshing notes…"
+                        ? "Refreshing notes · \(model.summaryGenerationElapsedSeconds)s"
                         : model.configuredSummaryAIName.map { "Refresh with \($0)" }
                             ?? "Refresh notes",
                     systemImage: "arrow.triangle.2.circlepath"
