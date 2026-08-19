@@ -434,6 +434,8 @@ struct ScribeRemoteMeetingSummarizer: MeetingSummarizer {
 }
 
 enum ScribeRemoteAIClient {
+    static let requestTimeoutSeconds: UInt64 = 120
+
     static func complete(
         prompt: String,
         settings: ScribeAISettings,
@@ -453,7 +455,7 @@ enum ScribeRemoteAIClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.timeoutInterval = 120
+        request.timeoutInterval = TimeInterval(requestTimeoutSeconds)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if settings.provider == .claude {
             request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -484,12 +486,12 @@ enum ScribeRemoteAIClient {
 
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = 120
-        configuration.timeoutIntervalForResource = 120
+        configuration.timeoutIntervalForRequest = TimeInterval(requestTimeoutSeconds)
+        configuration.timeoutIntervalForResource = TimeInterval(requestTimeoutSeconds)
         let (data, response) = try await ScribeNetworkDeadline.data(
             for: request,
             session: URLSession(configuration: configuration),
-            seconds: 90
+            seconds: requestTimeoutSeconds
         )
         guard let http = response as? HTTPURLResponse else { throw ScribeAIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
