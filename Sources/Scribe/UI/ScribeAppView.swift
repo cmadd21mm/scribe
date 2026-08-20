@@ -15,7 +15,7 @@ struct ScribeAppView: View {
                 if let meeting = model.selectedMeeting {
                     MeetingDetail(model: model, meeting: meeting)
                 } else {
-                    EmptyLibrary(model: model)
+                    ScribeHome(model: model)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -26,6 +26,9 @@ struct ScribeAppView: View {
         .preferredColorScheme(model.appearance.colorScheme)
         .sheet(isPresented: $model.showSettings) {
             ScribeSettingsView(model: model)
+        }
+        .sheet(isPresented: $model.showAISettings) {
+            ScribeAISettingsView(model: model)
         }
         .sheet(isPresented: $model.showOnboarding) {
             ScribeOnboardingView(model: model)
@@ -112,17 +115,37 @@ private struct MeetingSidebar: View {
 
                 ScribeSectionDivider()
 
+                Button {
+                    model.showHome()
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "house")
+                            .font(.system(size: 14, weight: .medium))
+                        Text("Home")
+                            .font(ScribeTheme.sans(14, weight: .medium))
+                        Spacer()
+                    }
+                    .foregroundStyle(ScribeTheme.ink)
+                    .padding(.horizontal, 12)
+                    .frame(height: 36)
+                    .background(model.selectedMeetingID == nil ? ScribeTheme.selection.opacity(0.72) : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .scribePointer()
+                .padding(.horizontal, 20)
+
                 HStack(spacing: 10) {
                     Image(systemName: "doc.text")
-                        .font(.system(size: 14, weight: .medium))
-                    Text("All Meetings")
-                        .font(ScribeTheme.sans(14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Meetings")
+                        .font(ScribeTheme.sans(12, weight: .semibold))
                     Spacer()
                     Text("\(model.meetings.count)")
-                        .font(ScribeTheme.sans(11, weight: .medium))
+                        .font(ScribeTheme.sans(10, weight: .medium))
                         .foregroundStyle(ScribeTheme.faintInk)
                 }
-                .foregroundStyle(ScribeTheme.ink)
+                .foregroundStyle(ScribeTheme.mutedInk)
                 .padding(.horizontal, 20)
 
                 Button {
@@ -543,18 +566,19 @@ private struct MeetingDetail: View {
             Spacer()
             if model.isRecording {
                 Button {
-                    model.onToggleRecording?()
+                    model.requestToggleRecording()
                 } label: {
                     Label("Stop", systemImage: "stop.circle.fill")
                 }
                 .buttonStyle(ScribeSecondaryButtonStyle())
             } else {
                 Button {
-                    model.onToggleRecording?()
+                    model.requestToggleRecording()
                 } label: {
-                    Label("Record", systemImage: "record.circle")
+                    Label(model.isStartingRecording ? "Starting…" : "Record", systemImage: "record.circle")
                 }
                 .buttonStyle(ScribePrimaryButtonStyle())
+                .disabled(model.isStartingRecording)
             }
 
             Button {
@@ -759,38 +783,168 @@ private struct MeetingDetail: View {
     }()
 }
 
-private struct EmptyLibrary: View {
+private struct ScribeHome: View {
     @ObservedObject var model: ScribeAppModel
 
     var body: some View {
-        VStack(spacing: 20) {
-            Image(systemName: "quote.bubble")
-                .font(.system(size: 48, weight: .light))
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(ScribeTheme.coral, ScribeTheme.ink)
-            Text(model.searchText.isEmpty ? "Stay in the conversation." : "Nothing found")
-                .font(ScribeTheme.serif(34, weight: .medium))
-                .foregroundStyle(ScribeTheme.ink)
-            Text(model.searchText.isEmpty
-                 ? "Start a recording when a conversation matters. Scribe will keep the audio, transcript, and notes together on this Mac."
-                 : "Try a different name, topic, person, or phrase.")
-                .font(ScribeTheme.sans(14))
-                .foregroundStyle(ScribeTheme.mutedInk)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 490)
-                .lineSpacing(4)
-            if model.searchText.isEmpty {
-                Button {
-                    model.onToggleRecording?()
-                } label: {
-                    Label("Start recording", systemImage: "record.circle")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 30) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(homeGreeting)
+                        .font(ScribeTheme.serif(45, weight: .medium))
+                        .foregroundStyle(ScribeTheme.ink)
+                    Text("Capture a conversation when it matters. Nothing starts until you choose Record.")
+                        .font(ScribeTheme.sans(14))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                        .lineSpacing(4)
                 }
-                .buttonStyle(ScribePrimaryButtonStyle())
+
+                recordingCard
+
+                if !model.meetings.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack {
+                            Text("Recent meetings")
+                                .font(ScribeTheme.serif(23, weight: .semibold))
+                                .foregroundStyle(ScribeTheme.ink)
+                            Spacer()
+                            Text("Saved locally")
+                                .font(ScribeTheme.sans(10, weight: .medium))
+                                .foregroundStyle(ScribeTheme.faintInk)
+                        }
+                        ForEach(model.meetings.prefix(4)) { meeting in
+                            Button {
+                                model.selectedMeetingID = meeting.id
+                            } label: {
+                                HStack(spacing: 14) {
+                                    Image(systemName: meeting.hasTranscript ? "checkmark.circle" : "waveform")
+                                        .font(.system(size: 16))
+                                        .foregroundStyle(meeting.hasTranscript ? ScribeTheme.ink : ScribeTheme.coral)
+                                        .frame(width: 22)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(meeting.title)
+                                            .font(ScribeTheme.sans(13, weight: .semibold))
+                                            .foregroundStyle(ScribeTheme.ink)
+                                            .lineLimit(1)
+                                        Text("\(Self.date.string(from: meeting.startedAt)) · \(meeting.sourceName)")
+                                            .font(ScribeTheme.sans(10))
+                                            .foregroundStyle(ScribeTheme.faintInk)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundStyle(ScribeTheme.faintInk)
+                                }
+                                .padding(.horizontal, 16)
+                                .frame(height: 58)
+                                .background(ScribeTheme.surface.opacity(0.68))
+                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .stroke(ScribeTheme.divider, lineWidth: 1)
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .scribePointer()
+                        }
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    Image(systemName: model.configuredSummaryAIName == nil ? "sparkles" : "checkmark.seal")
+                        .foregroundStyle(ScribeTheme.coral)
+                    Text(model.configuredSummaryAIName.map { "Meeting analysis is connected to \($0)." }
+                         ?? "Connect meeting AI to generate reliable summaries and action items.")
+                        .font(ScribeTheme.sans(11))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                    Spacer()
+                    Button(model.configuredSummaryAIName == nil ? "Set up" : "AI settings") {
+                        model.showAISettings = true
+                    }
+                    .buttonStyle(.plain)
+                    .scribePointer()
+                    .font(ScribeTheme.sans(11, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.coral)
+                }
+                .padding(16)
+                .background(ScribeTheme.surface.opacity(0.50))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
+            .frame(maxWidth: 760, alignment: .leading)
+            .padding(.horizontal, 48)
+            .padding(.vertical, 48)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(60)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    private var recordingCard: some View {
+        HStack(spacing: 22) {
+            ZStack {
+                Circle()
+                    .fill(ScribeTheme.coral.opacity(0.12))
+                    .frame(width: 66, height: 66)
+                Image(systemName: model.isRecording ? "waveform" : "record.circle.fill")
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(ScribeTheme.coral)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(recordingTitle)
+                    .font(ScribeTheme.serif(24, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Text(recordingDetail)
+                    .font(ScribeTheme.sans(12))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            }
+            Spacer()
+            Button {
+                model.requestToggleRecording()
+            } label: {
+                Label(recordingButtonTitle, systemImage: model.isRecording ? "stop.fill" : "record.circle")
+                    .frame(minWidth: 112)
+            }
+            .buttonStyle(ScribePrimaryButtonStyle())
+            .disabled(model.isStartingRecording)
+        }
+        .padding(24)
+        .background(ScribeTheme.surface.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(model.isRecording ? ScribeTheme.coral.opacity(0.55) : ScribeTheme.divider, lineWidth: 1)
+        )
+    }
+
+    private var recordingTitle: String {
+        if model.isRecording { return "Recording · \(model.recordingElapsed)" }
+        if model.isStartingRecording { return "Starting recording…" }
+        return "Ready to record"
+    }
+
+    private var recordingDetail: String {
+        if model.isRecording { return "Scribe is saving this conversation locally on your Mac." }
+        if model.isStartingRecording { return "Checking microphone and system-audio access." }
+        return "Works for in-person conversations, Google Meet, Zoom, Teams, and other call apps."
+    }
+
+    private var recordingButtonTitle: String {
+        if model.isRecording { return "Stop" }
+        if model.isStartingRecording { return "Starting…" }
+        return "Record"
+    }
+
+    private var homeGreeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 12 { return "Good morning." }
+        if hour < 18 { return "Good afternoon." }
+        return "Good evening."
+    }
+
+    private static let date: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, MMM d"
+        return formatter
+    }()
 }
 
 private struct MeetingNotesEditor: View {

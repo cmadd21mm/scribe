@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.11
+
+- Added a dedicated Home view that opens by default, with a prominent recording
+  card, immediate starting/recording feedback, recent meetings, and AI status.
+- Fixed main-window recording actions so they return to Home and visibly enter a
+  Starting state while Scribe checks microphone and system-audio access.
+- Fixed the main-window Meeting AI setup action so it actually opens settings.
+
 ## 0.2.10
 
 - Fixed silent recording-start failures: Scribe now brings its window forward

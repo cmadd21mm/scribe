@@ -328,9 +328,18 @@ final class AppController {
         fallbackTitle: String = "Manual meeting",
         sourceBundleID: String? = nil
     ) async {
-        guard !isStarting, session == nil else { return }
+        guard !isStarting, session == nil else {
+            model.isStartingRecording = false
+            return
+        }
         isStarting = true
-        defer { isStarting = false }
+        model.isStartingRecording = true
+        model.showHome()
+        windowController.present()
+        defer {
+            isStarting = false
+            model.isStartingRecording = false
+        }
         let context = await calendar.context(
             at: Date(),
             fallbackTitle: fallbackTitle,

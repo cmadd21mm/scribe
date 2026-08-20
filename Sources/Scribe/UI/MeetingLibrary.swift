@@ -581,6 +581,7 @@ final class ScribeAppModel: ObservableObject {
     @Published var selectedMeetingID: String?
     @Published var searchText = ""
     @Published var isRecording = false
+    @Published var isStartingRecording = false
     @Published var recordingElapsed = "0:00"
     @Published var transcriptionStatus: String?
     @Published var showSettings = false
@@ -673,8 +674,29 @@ final class ScribeAppModel: ObservableObject {
         if let previous, meetings.contains(where: { $0.id == previous }) {
             selectedMeetingID = previous
         } else {
-            selectedMeetingID = meetings.first?.id
+            selectedMeetingID = nil
         }
+    }
+
+    func showHome() {
+        selectedMeetingID = nil
+        searchText = ""
+    }
+
+    func requestToggleRecording() {
+        if isRecording {
+            onToggleRecording?()
+            return
+        }
+        guard !isStartingRecording else { return }
+        showHome()
+        isStartingRecording = true
+        guard let onToggleRecording else {
+            isStartingRecording = false
+            alertMessage = "Scribe couldn’t reach its recording controller. Quit and reopen Scribe, then try again."
+            return
+        }
+        onToggleRecording()
     }
 
     func changeRoot(_ url: URL) {

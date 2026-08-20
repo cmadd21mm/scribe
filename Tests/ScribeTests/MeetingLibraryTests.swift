@@ -4,6 +4,29 @@ import Testing
 @testable import Scribe
 
 struct MeetingLibraryTests {
+    @Test("The app opens on Home instead of an old meeting")
+    @MainActor
+    func opensOnHome() {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        #expect(!model.meetings.isEmpty)
+        #expect(model.selectedMeetingID == nil)
+    }
+
+    @Test("A recording request returns Home and immediately shows progress")
+    @MainActor
+    func recordingRequestFeedback() throws {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        model.selectedMeetingID = try #require(model.meetings.first?.id)
+        var didReachController = false
+        model.onToggleRecording = { didReachController = true }
+
+        model.requestToggleRecording()
+
+        #expect(didReachController)
+        #expect(model.selectedMeetingID == nil)
+        #expect(model.isStartingRecording)
+    }
+
     @Test("The library reads generated meeting folders and local user state")
     func readsMeetingFolder() throws {
         let root = FileManager.default.temporaryDirectory
