@@ -600,6 +600,7 @@ final class ScribeAppModel: ObservableObject {
     @Published var summaryFailureMeetingID: String?
     @Published var summaryFailureMessage: String?
     @Published var alertMessage: String?
+    @Published var alertSettingsPane: String?
     @Published var playingMeetingID: String?
     @Published private(set) var root: URL
     @Published private(set) var promptForCalls: Bool
@@ -1055,6 +1056,14 @@ final class ScribeAppModel: ObservableObject {
     func openPrivacySettings(_ pane: String) {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!
         NSWorkspace.shared.open(url)
+    }
+
+    func dismissAlert(openSettings: Bool = false) {
+        if openSettings, let alertSettingsPane {
+            openPrivacySettings(alertSettingsPane)
+        }
+        alertMessage = nil
+        alertSettingsPane = nil
     }
 
     private func persist(_ change: (inout ScribeConfiguration) -> Void) {

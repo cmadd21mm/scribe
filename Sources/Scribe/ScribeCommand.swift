@@ -350,13 +350,11 @@ final class AppController {
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            let message: String
-            if case SystemAudioRecorder.RecorderError.tapCreationFailed = error {
-                message = Permissions.systemAudioSettingsMessage
-            } else {
-                message = "\(error)"
-            }
-            notifyUser(title: "Scribe: recording failed", body: message)
+            let presentation = RecordingFailureMapper.presentation(for: error)
+            model.alertMessage = presentation.message
+            model.alertSettingsPane = presentation.settingsPane
+            windowController.present()
+            notifyUser(title: "Scribe: recording failed", body: presentation.message)
             return
         }
 
@@ -554,12 +552,39 @@ final class AppController {
     }
 }
 
-private enum RecordingStartError: Error, CustomStringConvertible {
+enum RecordingStartError: Error, CustomStringConvertible {
     case permission(String)
 
     var description: String {
         switch self {
         case .permission(let message): return message
+        }
+    }
+}
+
+struct RecordingFailurePresentation: Equatable {
+    let message: String
+    let settingsPane: String?
+}
+
+enum RecordingFailureMapper {
+    static func presentation(for error: Error) -> RecordingFailurePresentation {
+        switch error {
+        case RecordingStartError.permission(let message):
+            return RecordingFailurePresentation(
+                message: message,
+                settingsPane: "Privacy_Microphone"
+            )
+        case SystemAudioRecorder.RecorderError.tapCreationFailed:
+            return RecordingFailurePresentation(
+                message: Permissions.systemAudioSettingsMessage,
+                settingsPane: "Privacy_ScreenCapture"
+            )
+        default:
+            return RecordingFailurePresentation(
+                message: "Scribe couldn’t start recording: \(error)",
+                settingsPane: nil
+            )
         }
     }
 }

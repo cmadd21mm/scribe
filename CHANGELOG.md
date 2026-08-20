@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.10
+
+- Fixed silent recording-start failures: Scribe now brings its window forward
+  and explains why recording could not begin.
+- Added an Open Settings action for denied microphone and system-audio access,
+  taking the user directly to the correct macOS privacy pane.
+- Kept failed starts from creating misleading empty meetings while making the
+  required recovery action unmissable in the app.
+
 ## 0.2.9
 
 - Added visible elapsed time while a meeting summary is being generated, plus

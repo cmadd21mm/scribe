@@ -80,10 +80,15 @@ struct ScribeAppView: View {
             "Scribe",
             isPresented: Binding(
                 get: { model.alertMessage != nil },
-                set: { if !$0 { model.alertMessage = nil } }
+                set: { if !$0 { model.dismissAlert() } }
             )
         ) {
-            Button("OK", role: .cancel) { model.alertMessage = nil }
+            if model.alertSettingsPane != nil {
+                Button("Open Settings") { model.dismissAlert(openSettings: true) }
+                Button("Not now", role: .cancel) { model.dismissAlert() }
+            } else {
+                Button("OK", role: .cancel) { model.dismissAlert() }
+            }
         } message: {
             Text(model.alertMessage ?? "")
         }
