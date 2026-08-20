@@ -581,6 +581,7 @@ final class ScribeAppModel: ObservableObject {
     @Published var selectedMeetingID: String?
     @Published var searchText = ""
     @Published var isRecording = false
+    @Published var isStartingRecording = false
     @Published var recordingElapsed = "0:00"
     @Published var transcriptionStatus: String?
     @Published var showSettings = false
@@ -600,6 +601,8 @@ final class ScribeAppModel: ObservableObject {
     @Published var summaryFailureMeetingID: String?
     @Published var summaryFailureMessage: String?
     @Published var alertMessage: String?
+    @Published var alertSettingsPane: String?
+    @Published var transientNotice: String?
     @Published var playingMeetingID: String?
     @Published private(set) var root: URL
     @Published private(set) var promptForCalls: Bool
@@ -621,6 +624,7 @@ final class ScribeAppModel: ObservableObject {
     private let demo: Bool
     private var playback = MeetingPlaybackController()
     private var summaryProgressTask: Task<Void, Never>?
+    private var noticeTask: Task<Void, Never>?
 
     init(root: URL, demo: Bool) {
         self.root = root
@@ -672,8 +676,29 @@ final class ScribeAppModel: ObservableObject {
         if let previous, meetings.contains(where: { $0.id == previous }) {
             selectedMeetingID = previous
         } else {
-            selectedMeetingID = meetings.first?.id
+            selectedMeetingID = nil
         }
+    }
+
+    func showHome() {
+        selectedMeetingID = nil
+        searchText = ""
+    }
+
+    func requestToggleRecording() {
+        if isRecording {
+            onToggleRecording?()
+            return
+        }
+        guard !isStartingRecording else { return }
+        showHome()
+        isStartingRecording = true
+        guard let onToggleRecording else {
+            isStartingRecording = false
+            alertMessage = "Scribe couldn’t reach its recording controller. Quit and reopen Scribe, then try again."
+            return
+        }
+        onToggleRecording()
     }
 
     func changeRoot(_ url: URL) {
@@ -688,20 +713,35 @@ final class ScribeAppModel: ObservableObject {
 
     func copySummary() {
         guard let meeting = selectedMeeting else { return }
+        let text = formattedSummary(for: meeting)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        showNotice("Summary copied")
+    }
+
+    func formattedSummary(for meeting: MeetingRecord) -> String {
         let actions = meeting.actionItems.map { "- \($0.text)" }.joined(separator: "\n")
-        let text = """
+        let decisions = meeting.decisions.map { "- \($0)" }.joined(separator: "\n")
+        let questions = meeting.openQuestions.map { "- \($0)" }.joined(separator: "\n")
+        return """
         # \(meeting.title)
 
         ## Summary
 
         \(meeting.summary)
 
+        ## Decisions
+
+        \(decisions.isEmpty ? "None identified." : decisions)
+
         ## Action items
 
         \(actions.isEmpty ? "None identified." : actions)
+
+        ## Open questions
+
+        \(questions.isEmpty ? "None identified." : questions)
         """
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 
     func revealSelectedMeeting() {
@@ -727,10 +767,12 @@ final class ScribeAppModel: ObservableObject {
                 let source = meeting.directory.appendingPathComponent("note.md")
                 if FileManager.default.fileExists(atPath: source.path) {
                     try FileManager.default.copyItem(at: source, to: destination)
+                    showNotice("Meeting exported")
                     return
                 }
             }
             try Data(renderMarkdown(meeting).utf8).write(to: destination, options: .atomic)
+            showNotice("Meeting exported")
         } catch {
             alertMessage = "Scribe couldn’t export this note: \(error.localizedDescription)"
         }
@@ -1010,6 +1052,7 @@ final class ScribeAppModel: ObservableObject {
             ScribeMeetingAssistant.contextText(scoped, redact: aiSettings.redactSensitive),
             forType: .string
         )
+        showNotice("Meeting context copied")
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) {
@@ -1057,6 +1100,24 @@ final class ScribeAppModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func dismissAlert(openSettings: Bool = false) {
+        if openSettings, let alertSettingsPane {
+            openPrivacySettings(alertSettingsPane)
+        }
+        alertMessage = nil
+        alertSettingsPane = nil
+    }
+
+    func showNotice(_ message: String) {
+        noticeTask?.cancel()
+        transientNotice = message
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            self?.transientNotice = nil
+        }
+    }
+
     private func persist(_ change: (inout ScribeConfiguration) -> Void) {
         do {
             try Config.update(change)
@@ -1068,6 +1129,8 @@ final class ScribeAppModel: ObservableObject {
     private func renderMarkdown(_ meeting: MeetingRecord) -> String {
         let actions = meeting.actionItems.map { "- [\($0.isComplete ? "x" : " ")] \($0.text)" }
             .joined(separator: "\n")
+        let decisions = meeting.decisions.map { "- \($0)" }.joined(separator: "\n")
+        let questions = meeting.openQuestions.map { "- \($0)" }.joined(separator: "\n")
         return """
         # \(meeting.title)
 
@@ -1075,9 +1138,17 @@ final class ScribeAppModel: ObservableObject {
 
         \(meeting.summary)
 
+        ## Decisions
+
+        \(decisions.isEmpty ? "_None identified._" : decisions)
+
         ## Action items
 
         \(actions.isEmpty ? "_None identified._" : actions)
+
+        ## Open questions
+
+        \(questions.isEmpty ? "_None identified._" : questions)
 
         ## My notes
 

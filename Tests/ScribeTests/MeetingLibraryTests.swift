@@ -4,6 +4,45 @@ import Testing
 @testable import Scribe
 
 struct MeetingLibraryTests {
+    @Test("The app opens on Home instead of an old meeting")
+    @MainActor
+    func opensOnHome() {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        #expect(!model.meetings.isEmpty)
+        #expect(model.selectedMeetingID == nil)
+    }
+
+    @Test("A recording request returns Home and immediately shows progress")
+    @MainActor
+    func recordingRequestFeedback() throws {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        model.selectedMeetingID = try #require(model.meetings.first?.id)
+        var didReachController = false
+        model.onToggleRecording = { didReachController = true }
+
+        model.requestToggleRecording()
+
+        #expect(didReachController)
+        #expect(model.selectedMeetingID == nil)
+        #expect(model.isStartingRecording)
+    }
+
+    @Test("Copied summaries preserve decisions, actions, and open questions")
+    @MainActor
+    func completeSummaryCopy() throws {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        let meeting = try #require(model.meetings.first)
+
+        let text = model.formattedSummary(for: meeting)
+
+        #expect(text.contains("## Decisions"))
+        #expect(text.contains(try #require(meeting.decisions.first)))
+        #expect(text.contains("## Action items"))
+        #expect(text.contains(try #require(meeting.actionItems.first?.text)))
+        #expect(text.contains("## Open questions"))
+        #expect(text.contains(try #require(meeting.openQuestions.first)))
+    }
+
     @Test("The library reads generated meeting folders and local user state")
     func readsMeetingFolder() throws {
         let root = FileManager.default.temporaryDirectory
@@ -144,5 +183,25 @@ struct MeetingLibraryTests {
 
         let meeting = try #require(MeetingLibraryReader.read(directory: root))
         #expect(meeting.sourceName == "Google Meet")
+    }
+
+    @Test("Speaker track names and per-moment corrections persist")
+    func speakerNamesRoundTrip() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scribe-speakers-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data(#"{"state":"complete","title":"Interview"}"#.utf8)
+            .write(to: root.appendingPathComponent("meta.json"))
+        try Data(#"{"segments":[{"speaker":"me","start_ms":0,"text":"Welcome."},{"speaker":"them","start_ms":1000,"text":"Thanks."}]}"#.utf8)
+            .write(to: root.appendingPathComponent("transcript.json"))
+
+        let meeting = try #require(MeetingLibraryReader.read(directory: root))
+        try MeetingLibraryReader.saveSpeakerNames(["me": "Charlie", "them": "Rapha"], for: meeting)
+        try MeetingLibraryReader.saveSpeakerOverrides([1: "Alex"], for: meeting)
+
+        let updated = try #require(MeetingLibraryReader.read(directory: root))
+        #expect(updated.transcript.map(\.speaker) == ["Charlie", "Alex"])
+        #expect(updated.speakerOverrides == [1: "Alex"])
     }
 }

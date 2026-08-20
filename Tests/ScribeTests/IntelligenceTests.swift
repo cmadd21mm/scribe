@@ -9,6 +9,26 @@ struct IntelligenceTests {
         #expect(ScribeRemoteAIClient.requestTimeoutSeconds == 120)
     }
 
+    @Test("Venice Ask requests disable slow reasoning and web search")
+    func responsiveVeniceAskBody() throws {
+        let body = ScribeRemoteAIClient.openAICompatibleBody(
+            prompt: "What did we decide?",
+            settings: ScribeAISettings(
+                provider: .venice,
+                model: "kimi-k3-fast-api",
+                baseURL: "",
+                redactSensitive: true
+            ),
+            maxTokens: 800,
+            structuredMeetingNote: false
+        )
+        let parameters = try #require(body["venice_parameters"] as? [String: Any])
+        #expect(parameters["disable_thinking"] as? Bool == true)
+        #expect(parameters["enable_web_search"] as? String == "off")
+        #expect(parameters["include_venice_system_prompt"] as? Bool == false)
+        #expect(body["response_format"] == nil)
+    }
+
     @Test("Kimi K3 is available immediately even before Venice catalog refresh")
     func kimiK3Fallback() {
         let models = ScribeAIModelCatalog.veniceFallbackModels

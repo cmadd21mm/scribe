@@ -4,6 +4,22 @@ import Testing
 @testable import Scribe
 
 struct MainMenuTests {
+    @Test("A denied microphone recording opens the correct privacy pane")
+    func deniedMicrophonePresentation() {
+        let result = RecordingFailureMapper.presentation(
+            for: RecordingStartError.permission("Microphone access is required.")
+        )
+        #expect(result.message == "Microphone access is required.")
+        #expect(result.settingsPane == "Privacy_Microphone")
+    }
+
+    @Test("Unknown recording failures stay visible without guessing a settings pane")
+    func genericRecordingFailurePresentation() {
+        let result = RecordingFailureMapper.presentation(for: CocoaError(.fileWriteUnknown))
+        #expect(result.message.contains("couldn’t start recording"))
+        #expect(result.settingsPane == nil)
+    }
+
     @Test("Edit menu routes Paste through the focused text responder")
     @MainActor
     func pasteUsesResponderChain() throws {

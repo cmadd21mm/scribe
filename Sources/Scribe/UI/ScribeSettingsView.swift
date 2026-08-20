@@ -1,3 +1,5 @@
+import AVFoundation
+import EventKit
 import SwiftUI
 
 struct ScribeSettingsView: View {
@@ -255,17 +257,20 @@ struct ScribeSettingsView: View {
                         permissionRow(
                             title: "Microphone",
                             detail: "Captures your side of a conversation.",
-                            pane: "Privacy_Microphone"
+                            pane: "Privacy_Microphone",
+                            status: microphonePermission
                         )
                         permissionRow(
                             title: "Screen & System Audio",
                             detail: "Captures the other side from the chosen call app.",
-                            pane: "Privacy_ScreenCapture"
+                            pane: "Privacy_ScreenCapture",
+                            status: .init(text: "Checked when you record", symbol: "waveform.badge.magnifyingglass", needsAction: false)
                         )
                         permissionRow(
                             title: "Calendars",
                             detail: "Optional: names notes from the current event.",
-                            pane: "Privacy_Calendars"
+                            pane: "Privacy_Calendars",
+                            status: calendarPermission
                         )
                     }
 
@@ -336,10 +341,47 @@ struct ScribeSettingsView: View {
         }
     }
 
-    private func permissionRow(title: String, detail: String, pane: String) -> some View {
+    private struct PermissionDisplay {
+        let text: String
+        let symbol: String
+        let needsAction: Bool
+    }
+
+    private var microphonePermission: PermissionDisplay {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
+        case .notDetermined:
+            return .init(text: "Asked on first recording", symbol: "questionmark.shield", needsAction: false)
+        case .denied, .restricted:
+            return .init(text: "Needs access", symbol: "exclamationmark.shield", needsAction: true)
+        @unknown default:
+            return .init(text: "Check access", symbol: "questionmark.shield", needsAction: true)
+        }
+    }
+
+    private var calendarPermission: PermissionDisplay {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .authorized, .fullAccess, .writeOnly:
+            return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
+        case .notDetermined:
+            return .init(text: "Optional", symbol: "calendar.badge.plus", needsAction: false)
+        case .denied, .restricted:
+            return .init(text: "Not allowed · optional", symbol: "calendar.badge.exclamationmark", needsAction: false)
+        @unknown default:
+            return .init(text: "Check access", symbol: "questionmark.shield", needsAction: false)
+        }
+    }
+
+    private func permissionRow(
+        title: String,
+        detail: String,
+        pane: String,
+        status: PermissionDisplay
+    ) -> some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "checkmark.shield")
-                .foregroundStyle(ScribeTheme.ink)
+            Image(systemName: status.symbol)
+                .foregroundStyle(status.needsAction ? ScribeTheme.coral : ScribeTheme.ink)
                 .frame(width: 28, height: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -348,10 +390,14 @@ struct ScribeSettingsView: View {
                 Text(detail)
                     .font(ScribeTheme.sans(10))
                     .foregroundStyle(ScribeTheme.faintInk)
+                Text(status.text)
+                    .font(ScribeTheme.sans(10, weight: .semibold))
+                    .foregroundStyle(status.needsAction ? ScribeTheme.coral : ScribeTheme.mutedInk)
             }
             Spacer()
             Button("Open Settings") { model.openPrivacySettings(pane) }
                 .buttonStyle(ScribeSecondaryButtonStyle())
+                .accessibilityLabel("Open macOS settings for \(title)")
         }
     }
 }
@@ -461,6 +507,7 @@ struct ScribeAISettingsView: View {
     @ObservedObject var model: ScribeAppModel
     @Environment(\.dismiss) private var dismiss
     private let onClose: (() -> Void)?
+    private let loadsStoredKey: Bool
     @State private var provider: ScribeAIProvider
     @State private var modelName: String
     @State private var baseURL: String
@@ -474,10 +521,16 @@ struct ScribeAISettingsView: View {
     @State private var modelRequestID = UUID()
     @State private var modelLoadTask: Task<Void, Never>?
     @State private var keySaveMessage: String?
+    @State private var isLoadingStoredKey = false
 
-    init(model: ScribeAppModel, onClose: (() -> Void)? = nil) {
+    init(
+        model: ScribeAppModel,
+        onClose: (() -> Void)? = nil,
+        apiKeyOverride: String? = nil
+    ) {
         self.model = model
         self.onClose = onClose
+        self.loadsStoredKey = apiKeyOverride == nil
         let current = model.aiSettings
         _provider = State(initialValue: current.provider)
         let starterModels = current.provider == .venice
@@ -487,7 +540,7 @@ struct ScribeAISettingsView: View {
             ? (starterModels.first?.id ?? "")
             : current.model)
         _baseURL = State(initialValue: current.baseURL)
-        _apiKey = State(initialValue: ScribeKeychain.apiKey(provider: current.provider))
+        _apiKey = State(initialValue: apiKeyOverride ?? "")
         _redactSensitive = State(initialValue: current.redactSensitive)
         _availableModels = State(initialValue: starterModels)
     }
@@ -523,7 +576,8 @@ struct ScribeAISettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onChange(of: provider) { _, value in
                     baseURL = value.defaultBaseURL
-                    apiKey = ScribeKeychain.apiKey(provider: value)
+                    apiKey = ""
+                    loadStoredKey(for: value)
                     availableModels = value == .venice
                         ? ScribeAIModelCatalog.veniceFallbackModels
                         : []
@@ -552,6 +606,9 @@ struct ScribeAISettingsView: View {
                         HStack(spacing: 9) {
                             SecureField("Stored in your Mac Keychain", text: $apiKey)
                                 .textFieldStyle(.roundedBorder)
+                                .disabled(isLoadingStoredKey)
+                                .accessibilityLabel("\(provider.title) API key")
+                                .accessibilityHint("Stored only in your Mac Keychain")
                                 .onChange(of: apiKey) { _, _ in
                                     availableModels = []
                                     modelSearch = ""
@@ -564,7 +621,13 @@ struct ScribeAISettingsView: View {
                                 }
                             Button("Save key") { saveKey() }
                                 .buttonStyle(ScribeSecondaryButtonStyle())
-                                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .disabled(isLoadingStoredKey || apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                                .accessibilityHint("Saves this key securely without closing settings")
+                        }
+                        if isLoadingStoredKey {
+                            Label("Waiting for Mac Keychain approval…", systemImage: "key.horizontal")
+                                .font(ScribeTheme.sans(11))
+                                .foregroundStyle(ScribeTheme.mutedInk)
                         }
                         if let keySaveMessage {
                             Label(keySaveMessage, systemImage: "checkmark.shield")
@@ -625,12 +688,16 @@ struct ScribeAISettingsView: View {
                     }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityHint("Saves the provider, model, privacy option, and API key")
                 }
             }
             .padding(24)
         }
         .frame(width: 640, height: provider == .local ? 390 : 690)
         .background(ScribeTheme.paper)
+        .onAppear {
+            if loadsStoredKey { loadStoredKey(for: provider) }
+        }
         .onDisappear { cancelModelLoad() }
     }
 
@@ -676,48 +743,25 @@ struct ScribeAISettingsView: View {
                         .foregroundStyle(ScribeTheme.mutedInk)
                 }
 
-                Menu {
+                Picker("Model", selection: $modelName) {
                     ForEach(filteredModels) { option in
-                        Button {
-                            modelName = option.id
-                        } label: {
-                            if option.id == modelName {
-                                Label(optionMenuTitle(option), systemImage: "checkmark")
-                            } else {
-                                Text(optionMenuTitle(option))
-                            }
-                        }
+                        Text(optionMenuTitle(option)).tag(option.id)
                     }
-                } label: {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(selectedModel?.title ?? "Choose a model")
-                                .font(ScribeTheme.sans(12, weight: .medium))
-                                .foregroundStyle(ScribeTheme.ink)
-                            if let selectedModel {
-                                Text(selectedModel.detail)
-                                    .font(ScribeTheme.sans(9))
-                                    .foregroundStyle(ScribeTheme.mutedInk)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(ScribeTheme.faintInk)
-                    }
-                    .padding(.horizontal, 12)
-                    .frame(height: 48)
-                    .background(ScribeTheme.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .stroke(ScribeTheme.divider, lineWidth: 1)
-                    )
                 }
-                .menuStyle(.borderlessButton)
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .disabled(filteredModels.isEmpty)
                 .scribePointer()
+                .accessibilityLabel("Meeting intelligence model, \(selectedModel?.title ?? modelName)")
+                .accessibilityHint("Opens the available model list")
+
+                if let selectedModel {
+                    Text(selectedModel.detail)
+                        .font(ScribeTheme.sans(11))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Button("Enter a model ID manually") {
                     usesManualModelEntry = true
@@ -856,6 +900,19 @@ struct ScribeAISettingsView: View {
         } catch {
             keySaveMessage = nil
             model.alertMessage = "Scribe couldn’t save this API key: \(error.localizedDescription)"
+        }
+    }
+
+    private func loadStoredKey(for requestedProvider: ScribeAIProvider) {
+        guard loadsStoredKey else { return }
+        isLoadingStoredKey = true
+        Task {
+            let storedKey = await Task.detached(priority: .userInitiated) {
+                ScribeKeychain.apiKey(provider: requestedProvider)
+            }.value
+            guard provider == requestedProvider else { return }
+            apiKey = storedKey
+            isLoadingStoredKey = false
         }
     }
 
