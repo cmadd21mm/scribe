@@ -445,7 +445,12 @@ enum ScribeRemoteAIClient {
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ScribeAIError.missingModel
         }
-        let key = ScribeKeychain.apiKey(provider: settings.provider)
+        // Keychain can present an authorization dialog after installation or
+        // signing changes. Read it off the main actor so that dialog can never
+        // make Scribe's window look frozen while a request is starting.
+        let key = await Task.detached(priority: .userInitiated) {
+            ScribeKeychain.apiKey(provider: settings.provider)
+        }.value
         if settings.provider.needsAPIKey && key.isEmpty { throw ScribeAIError.missingAPIKey }
         let base = settings.baseURL.isEmpty ? settings.provider.defaultBaseURL : settings.baseURL
         let suffix = settings.provider == .claude ? "/messages" : "/chat/completions"
@@ -467,20 +472,12 @@ enum ScribeRemoteAIClient {
             ])
         } else {
             if !key.isEmpty { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
-            var body: [String: Any] = [
-                "model": settings.model,
-                "max_completion_tokens": maxTokens,
-                "messages": [["role": "user", "content": prompt]],
-            ]
-            if structuredMeetingNote && settings.provider == .venice {
-                body["response_format"] = meetingNoteResponseFormat
-                body["venice_parameters"] = [
-                    "disable_thinking": true,
-                    "enable_web_search": "off",
-                    "include_venice_system_prompt": false,
-                ]
-            }
-            if settings.provider == .openAI { body["store"] = false }
+            let body = openAICompatibleBody(
+                prompt: prompt,
+                settings: settings,
+                maxTokens: maxTokens,
+                structuredMeetingNote: structuredMeetingNote
+            )
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
 
@@ -522,6 +519,34 @@ enum ScribeRemoteAIClient {
            let reasoning = message["reasoning_content"] as? String,
            reasoning.contains("{") { return reasoning }
         throw ScribeAIError.invalidResponse
+    }
+
+    static func openAICompatibleBody(
+        prompt: String,
+        settings: ScribeAISettings,
+        maxTokens: Int,
+        structuredMeetingNote: Bool
+    ) -> [String: Any] {
+        var body: [String: Any] = [
+            "model": settings.model,
+            "max_completion_tokens": maxTokens,
+            "messages": [["role": "user", "content": prompt]],
+        ]
+        if settings.provider == .venice {
+            // Kimi reasoning can add minutes to a simple meeting question.
+            // Scribe asks for grounded notes, not hidden chain-of-thought, so
+            // keep every user-invoked Venice request responsive and private.
+            body["venice_parameters"] = [
+                "disable_thinking": true,
+                "enable_web_search": "off",
+                "include_venice_system_prompt": false,
+            ]
+            if structuredMeetingNote {
+                body["response_format"] = meetingNoteResponseFormat
+            }
+        }
+        if settings.provider == .openAI { body["store"] = false }
+        return body
     }
 
     private static var meetingNoteResponseFormat: [String: Any] {

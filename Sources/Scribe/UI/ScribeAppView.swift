@@ -95,6 +95,22 @@ struct ScribeAppView: View {
         } message: {
             Text(model.alertMessage ?? "")
         }
+        .overlay(alignment: .bottom) {
+            if let notice = model.transientNotice {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .font(ScribeTheme.sans(12, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(ScribeTheme.button)
+                    .clipShape(Capsule())
+                    .shadow(color: Color.black.opacity(0.12), radius: 18, y: 8)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityAddTraits(.isStaticText)
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.84), value: model.transientNotice)
     }
 }
 
@@ -133,6 +149,8 @@ private struct MeetingSidebar: View {
                 }
                 .buttonStyle(.plain)
                 .scribePointer()
+                .accessibilityLabel("Home")
+                .accessibilityHint("Shows recording controls and recent meetings")
                 .padding(.horizontal, 20)
 
                 HStack(spacing: 10) {
@@ -166,6 +184,7 @@ private struct MeetingSidebar: View {
                 .buttonStyle(.plain)
                 .scribePointer()
                 .padding(.horizontal, 20)
+                .accessibilityLabel("Decision Log, \(model.meetings.reduce(0) { $0 + $1.decisions.count }) decisions")
 
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
@@ -173,6 +192,8 @@ private struct MeetingSidebar: View {
                     TextField("Search every note", text: $model.searchText)
                         .textFieldStyle(.plain)
                         .font(ScribeTheme.sans(13))
+                        .accessibilityLabel("Search meetings")
+                        .accessibilityHint("Searches meeting titles, notes, actions, and transcripts")
                     if !model.searchText.isEmpty {
                         Button {
                             model.searchText = ""
@@ -256,6 +277,8 @@ private struct MeetingSidebar: View {
                 .scribePointer()
                 .foregroundStyle(ScribeTheme.ink)
                 .help("Settings")
+                .accessibilityLabel("Settings")
+                .accessibilityHint("Opens recording, transcription, storage, appearance, and permission settings")
             }
             .padding(.horizontal, 20)
             .frame(height: 76)
@@ -360,6 +383,7 @@ private struct MeetingSidebarRow: View {
 private struct MeetingDetail: View {
     @ObservedObject var model: ScribeAppModel
     let meeting: MeetingRecord
+    @State private var showsFullTranscript = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -370,7 +394,7 @@ private struct MeetingDetail: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(meeting.title)
-                            .font(ScribeTheme.serif(54, weight: .medium))
+                            .font(ScribeTheme.serif(48, weight: .medium))
                             .foregroundStyle(ScribeTheme.ink)
                             .lineLimit(2)
                             .minimumScaleFactor(0.76)
@@ -384,6 +408,7 @@ private struct MeetingDetail: View {
                         .buttonStyle(.plain)
                         .scribePointer()
                         .help("Rename meeting")
+                        .accessibilityLabel("Rename meeting")
                         .disabled(meeting.state == "recording")
                     }
                     HStack(spacing: 9) {
@@ -424,15 +449,7 @@ private struct MeetingDetail: View {
                                     .font(ScribeTheme.sans(13))
                                     .foregroundStyle(ScribeTheme.mutedInk)
                                 if model.regeneratingMeetingID == meeting.id {
-                                    HStack(spacing: 9) {
-                                        ProgressView().controlSize(.small)
-                                        Text("Asking \(model.configuredSummaryAIName ?? "meeting AI") · \(model.summaryGenerationElapsedSeconds)s")
-                                            .font(ScribeTheme.sans(11, weight: .medium))
-                                            .foregroundStyle(ScribeTheme.ink)
-                                    }
-                                    Text("Most summaries finish in 10–30 seconds. Venice can occasionally take longer; Scribe stops after \(ScribeRemoteAIClient.requestTimeoutSeconds) seconds.")
-                                        .font(ScribeTheme.sans(10))
-                                        .foregroundStyle(ScribeTheme.faintInk)
+                                    summaryProgressCard
                                 } else {
                                     if let failure = model.summaryFailure(for: meeting.id) {
                                         Label("The last attempt didn’t finish: \(failure)", systemImage: "exclamationmark.triangle")
@@ -471,24 +488,45 @@ private struct MeetingDetail: View {
                                     .foregroundStyle(ScribeTheme.ink)
                                     .lineSpacing(5)
                                     .textSelection(.enabled)
-                                Button(
-                                    model.regeneratingMeetingID == meeting.id
-                                        ? "Refreshing with \(model.configuredSummaryAIName ?? "meeting AI") · \(model.summaryGenerationElapsedSeconds)s"
-                                        : model.configuredSummaryAIName.map { "Regenerate with \($0)" }
-                                            ?? "Regenerate summary"
-                                ) {
-                                    model.regenerateSelectedNote()
+                                if model.regeneratingMeetingID == meeting.id {
+                                    summaryProgressCard
+                                } else {
+                                    Button {
+                                        model.regenerateSelectedNote()
+                                    } label: {
+                                        Label(
+                                            model.configuredSummaryAIName.map { "Regenerate with \($0)" }
+                                                ?? "Regenerate summary",
+                                            systemImage: "arrow.triangle.2.circlepath"
+                                        )
+                                    }
+                                    .buttonStyle(ScribeSecondaryButtonStyle())
+                                    .disabled(
+                                        meeting.isDemo
+                                            || !meeting.hasTranscript
+                                            || meeting.state == "recording"
+                                            || model.regeneratingMeetingID != nil
+                                    )
+                                    .accessibilityHint("Replaces the current structured notes after the new result succeeds")
                                 }
-                                .buttonStyle(.plain)
-                                .font(ScribeTheme.sans(10, weight: .medium))
-                                .foregroundStyle(ScribeTheme.coral)
-                                .disabled(
-                                    meeting.isDemo
-                                        || !meeting.hasTranscript
-                                        || meeting.state == "recording"
-                                        || model.regeneratingMeetingID != nil
-                                )
-                                .scribePointer()
+                            }
+                        }
+                    }
+
+                    if !meeting.decisions.isEmpty {
+                        ScribeSectionDivider().padding(.vertical, 22)
+                        contentSection(title: "Decisions") {
+                            VStack(alignment: .leading, spacing: 11) {
+                                ForEach(Array(meeting.decisions.enumerated()), id: \.offset) { _, decision in
+                                    Label {
+                                        Text(decision)
+                                            .font(ScribeTheme.sans(14))
+                                            .foregroundStyle(ScribeTheme.ink)
+                                    } icon: {
+                                        Image(systemName: "checkmark.seal")
+                                            .foregroundStyle(ScribeTheme.coral)
+                                    }
+                                }
                             }
                         }
                     }
@@ -518,6 +556,24 @@ private struct MeetingDetail: View {
                                     }
                                     .buttonStyle(.plain)
                                     .scribePointer()
+                                }
+                            }
+                        }
+                    }
+
+                    if !meeting.openQuestions.isEmpty {
+                        ScribeSectionDivider().padding(.vertical, 22)
+                        contentSection(title: "Open Questions") {
+                            VStack(alignment: .leading, spacing: 11) {
+                                ForEach(Array(meeting.openQuestions.enumerated()), id: \.offset) { _, question in
+                                    Label {
+                                        Text(question)
+                                            .font(ScribeTheme.sans(14))
+                                            .foregroundStyle(ScribeTheme.ink)
+                                    } icon: {
+                                        Image(systemName: "questionmark.bubble")
+                                            .foregroundStyle(ScribeTheme.coral)
+                                    }
                                 }
                             }
                         }
@@ -571,6 +627,8 @@ private struct MeetingDetail: View {
                     Label("Stop", systemImage: "stop.circle.fill")
                 }
                 .buttonStyle(ScribeSecondaryButtonStyle())
+                .accessibilityLabel("Stop recording")
+                .accessibilityHint("Stops and saves the current recording")
             } else {
                 Button {
                     model.requestToggleRecording()
@@ -579,6 +637,8 @@ private struct MeetingDetail: View {
                 }
                 .buttonStyle(ScribePrimaryButtonStyle())
                 .disabled(model.isStartingRecording)
+                .accessibilityLabel(model.isStartingRecording ? "Starting recording" : "Start recording")
+                .accessibilityHint("Returns Home and starts a new recording after checking permissions")
             }
 
             Button {
@@ -587,6 +647,7 @@ private struct MeetingDetail: View {
                 Label("Add note", systemImage: "square.and.pencil")
             }
             .buttonStyle(ScribeSecondaryButtonStyle())
+            .accessibilityLabel("Add a personal note")
 
             Button {
                 model.showAssistant = true
@@ -594,14 +655,16 @@ private struct MeetingDetail: View {
                 Label("Ask Scribe", systemImage: "sparkles")
             }
             .buttonStyle(ScribeSecondaryButtonStyle())
+            .accessibilityLabel("Ask Scribe about this meeting")
 
             Button {
                 model.copySummary()
             } label: {
                 Text("Copy summary")
             }
-            .buttonStyle(ScribePrimaryButtonStyle())
+            .buttonStyle(ScribeSecondaryButtonStyle())
             .disabled(meeting.summary.isEmpty)
+            .accessibilityHint("Copies the summary, decisions, actions, and open questions")
 
             Menu {
                 Button("Rename Meeting…", systemImage: "pencil") {
@@ -648,6 +711,7 @@ private struct MeetingDetail: View {
             .menuStyle(.borderlessButton)
             .frame(width: 36)
             .scribePointer()
+            .accessibilityLabel("More meeting actions")
         }
     }
 
@@ -657,6 +721,33 @@ private struct MeetingDetail: View {
         case "interrupted": return "Recovered recording"
         default: return meeting.hasTranscript ? "Recording saved" : "Saved · processing locally"
         }
+    }
+
+    private var summaryProgressCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Generating with \(model.configuredSummaryAIName ?? "meeting AI") · \(model.summaryGenerationElapsedSeconds)s")
+                    .font(ScribeTheme.sans(12, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Text("Scribe keeps the current notes until the new result succeeds. Most requests finish in 10–30 seconds; the request stops after \(ScribeRemoteAIClient.requestTimeoutSeconds) seconds.")
+                    .font(ScribeTheme.sans(11))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(14)
+        .background(ScribeTheme.selection.opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(ScribeTheme.coral.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Generating meeting summary with \(model.configuredSummaryAIName ?? "meeting AI"), \(model.summaryGenerationElapsedSeconds) seconds elapsed")
     }
 
     private func metadataPill(_ text: String, symbol: String) -> some View {
@@ -697,6 +788,7 @@ private struct MeetingDetail: View {
                     .scribePointer()
                     .font(ScribeTheme.sans(10, weight: .medium))
                     .foregroundStyle(ScribeTheme.coral)
+                    .accessibilityHint("Opens controls for naming tracks and correcting individual moments")
                 }
             }
             if meeting.transcript.isEmpty {
@@ -709,13 +801,14 @@ private struct MeetingDetail: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: 9) {
-                    ForEach(meeting.transcript.prefix(16)) { line in
+                    ForEach(visibleTranscript) { line in
                         HStack(alignment: .firstTextBaseline, spacing: 12) {
                             Button(line.timestamp) {
                                 model.playSelectedMeeting(at: line.startMilliseconds)
                             }
                             .buttonStyle(.plain)
                             .scribePointer()
+                            .accessibilityLabel("Play transcript from \(line.timestamp)")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundStyle(ScribeTheme.faintInk)
                             .frame(width: 48, alignment: .leading)
@@ -733,9 +826,29 @@ private struct MeetingDetail: View {
                                 .textSelection(.enabled)
                         }
                     }
+                    if meeting.transcript.count > 16 {
+                        Button {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                showsFullTranscript.toggle()
+                            }
+                        } label: {
+                            Label(
+                                showsFullTranscript
+                                    ? "Show less"
+                                    : "Show all \(meeting.transcript.count) transcript lines",
+                                systemImage: showsFullTranscript ? "chevron.up" : "chevron.down"
+                            )
+                        }
+                        .buttonStyle(ScribeSecondaryButtonStyle())
+                        .padding(.top, 8)
+                    }
                 }
             }
         }
+    }
+
+    private var visibleTranscript: ArraySlice<MeetingTranscriptLine> {
+        meeting.transcript.prefix(showsFullTranscript ? meeting.transcript.count : 16)
     }
 
     private var playbackFooter: some View {
@@ -750,6 +863,7 @@ private struct MeetingDetail: View {
             }
             .buttonStyle(ScribeSecondaryButtonStyle())
             .disabled(meeting.isDemo)
+            .accessibilityLabel(model.playingMeetingID == meeting.id ? "Stop meeting playback" : "Play meeting from start")
             Spacer()
             Button("Open transcript in new window", systemImage: "arrow.up.forward.square") {
                 model.openTranscript()
@@ -809,7 +923,7 @@ private struct ScribeHome: View {
                                 .foregroundStyle(ScribeTheme.ink)
                             Spacer()
                             Text("Saved locally")
-                                .font(ScribeTheme.sans(10, weight: .medium))
+                                .font(ScribeTheme.sans(11, weight: .medium))
                                 .foregroundStyle(ScribeTheme.faintInk)
                         }
                         ForEach(model.meetings.prefix(4)) { meeting in
@@ -827,7 +941,7 @@ private struct ScribeHome: View {
                                             .foregroundStyle(ScribeTheme.ink)
                                             .lineLimit(1)
                                         Text("\(Self.date.string(from: meeting.startedAt)) · \(meeting.sourceName)")
-                                            .font(ScribeTheme.sans(10))
+                                            .font(ScribeTheme.sans(11))
                                             .foregroundStyle(ScribeTheme.faintInk)
                                     }
                                     Spacer()
@@ -846,6 +960,8 @@ private struct ScribeHome: View {
                             }
                             .buttonStyle(.plain)
                             .scribePointer()
+                            .accessibilityLabel("Open \(meeting.title)")
+                            .accessibilityHint("Opens this meeting’s summary, actions, and transcript")
                         }
                     }
                 }
@@ -865,6 +981,7 @@ private struct ScribeHome: View {
                     .scribePointer()
                     .font(ScribeTheme.sans(11, weight: .semibold))
                     .foregroundStyle(ScribeTheme.coral)
+                    .accessibilityHint("Opens meeting intelligence settings")
                 }
                 .padding(16)
                 .background(ScribeTheme.surface.opacity(0.50))
@@ -905,6 +1022,8 @@ private struct ScribeHome: View {
             }
             .buttonStyle(ScribePrimaryButtonStyle())
             .disabled(model.isStartingRecording)
+            .accessibilityLabel(model.isRecording ? "Stop recording" : model.isStartingRecording ? "Starting recording" : "Start recording")
+            .accessibilityHint(model.isRecording ? "Stops and saves the current recording" : "Checks permissions, then records the microphone and supported call audio")
         }
         .padding(24)
         .background(ScribeTheme.surface.opacity(0.78))
@@ -1164,7 +1283,7 @@ private struct MeetingSpeakerEditor: View {
     }
 }
 
-private struct ScribeAssistantView: View {
+struct ScribeAssistantView: View {
     enum Scope: String, CaseIterable {
         case meeting = "This meeting"
         case project = "This project"
@@ -1178,6 +1297,7 @@ private struct ScribeAssistantView: View {
     @State private var messages: [ScribeChatMessage] = []
     @State private var scope: Scope = .meeting
     @State private var isAnswering = false
+    @State private var answerStartedAt: Date?
     @State private var showingAISettings = false
     @FocusState private var questionFocused: Bool
 
@@ -1240,13 +1360,20 @@ private struct ScribeAssistantView: View {
                                 .id(message.id)
                         }
                         if isAnswering {
-                            HStack(spacing: 9) {
-                                ProgressView().controlSize(.small)
-                                Text("Reading the selected meeting context…")
-                                    .font(ScribeTheme.sans(11))
-                                    .foregroundStyle(ScribeTheme.faintInk)
+                            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                                HStack(spacing: 9) {
+                                    ProgressView().controlSize(.small)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Asking \(model.configuredSummaryAIName ?? model.aiSettings.provider.title) · \(answerElapsed(at: timeline.date))s")
+                                            .font(ScribeTheme.sans(11, weight: .semibold))
+                                            .foregroundStyle(ScribeTheme.mutedInk)
+                                        Text("The request stops after 120 seconds; your local notes are never changed.")
+                                            .font(ScribeTheme.sans(11))
+                                            .foregroundStyle(ScribeTheme.faintInk)
+                                    }
+                                }
+                                .padding(14)
                             }
-                            .padding(14)
                         }
                     }
                     .padding(22)
@@ -1285,6 +1412,7 @@ private struct ScribeAssistantView: View {
                         .scribePointer()
                         .font(ScribeTheme.sans(10, weight: .medium))
                         .foregroundStyle(ScribeTheme.mutedInk)
+                        .accessibilityHint("Copies the selected local meeting context for use elsewhere")
                     Button("AI settings…") {
                         questionFocused = false
                         showingAISettings = true
@@ -1293,6 +1421,7 @@ private struct ScribeAssistantView: View {
                         .scribePointer()
                         .font(ScribeTheme.sans(10, weight: .medium))
                         .foregroundStyle(ScribeTheme.coral)
+                        .accessibilityHint("Opens provider, API key, privacy, and model settings")
                 }
             }
             .padding(18)
@@ -1338,14 +1467,30 @@ private struct ScribeAssistantView: View {
     }
 
     private func suggestion(_ text: String) -> some View {
-        Button(text) {
+        Button {
             question = text
             questionFocused = true
+        } label: {
+            HStack(spacing: 10) {
+                Text(text)
+                    .font(ScribeTheme.sans(12, weight: .medium))
+                Spacer()
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(ScribeTheme.ink)
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(ScribeTheme.paper.opacity(0.72))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(ScribeTheme.divider, lineWidth: 1)
+            )
         }
-            .buttonStyle(.plain)
-            .scribePointer()
-            .font(ScribeTheme.sans(12, weight: .medium))
-            .foregroundStyle(ScribeTheme.mutedInk)
+        .buttonStyle(.plain)
+        .scribePointer()
+        .accessibilityLabel("Use suggested question: \(text)")
     }
 
     private func chatBubble(_ message: ScribeChatMessage) -> some View {
@@ -1388,6 +1533,7 @@ private struct ScribeAssistantView: View {
         messages.append(ScribeChatMessage(role: .user, text: value))
         question = ""
         isAnswering = true
+        answerStartedAt = Date()
         let settings = model.aiSettings
         let meetings = selectedMeetings
         Task {
@@ -1404,8 +1550,14 @@ private struct ScribeAssistantView: View {
                     text: "I couldn’t answer that: \(error.localizedDescription)"
                 ))
             }
+            answerStartedAt = nil
             isAnswering = false
         }
+    }
+
+    private func answerElapsed(at date: Date) -> Int {
+        guard let answerStartedAt else { return 0 }
+        return max(0, Int(date.timeIntervalSince(answerStartedAt)))
     }
 
     private func timestamps(in text: String) -> [String] {

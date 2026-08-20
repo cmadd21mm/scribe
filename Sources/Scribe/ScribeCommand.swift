@@ -31,6 +31,9 @@ struct ScribeCommand: AsyncParsableCommand {
 
 private enum DemoSnapshotScreen: String, ExpressibleByArgument {
     case library
+    case meeting
+    case summary
+    case assistant
     case rename
     case settings
     case models
@@ -47,7 +50,7 @@ struct DemoSnapshot: AsyncParsableCommand {
     @Option(name: .long, help: "PNG output path.")
     var output: String = "scribe-demo.png"
 
-    @Option(name: .long, help: "Screen to render: library, rename, settings, models, intelligence, or onboarding.")
+    @Option(name: .long, help: "Screen to render: library, meeting, summary, assistant, rename, settings, models, intelligence, or onboarding.")
     private var screen: DemoSnapshotScreen = .library
 
     @Option(name: .long, help: "Appearance to render: light or dark.")
@@ -66,6 +69,19 @@ struct DemoSnapshot: AsyncParsableCommand {
         case .library:
             size = CGSize(width: 1_440, height: 1_024)
             selectedView = AnyView(ScribeAppView(model: model))
+        case .meeting:
+            size = CGSize(width: 1_440, height: 1_024)
+            model.selectedMeetingID = model.meetings[0].id
+            selectedView = AnyView(ScribeAppView(model: model))
+        case .summary:
+            size = CGSize(width: 1_440, height: 1_024)
+            model.selectedMeetingID = model.meetings[0].id
+            model.regeneratingMeetingID = model.meetings[0].id
+            model.summaryGenerationElapsedSeconds = 18
+            selectedView = AnyView(ScribeAppView(model: model))
+        case .assistant:
+            size = CGSize(width: 760, height: 700)
+            selectedView = AnyView(ScribeAssistantView(model: model, meeting: model.meetings[0]))
         case .rename:
             size = CGSize(width: 500, height: 220)
             selectedView = AnyView(MeetingRenameEditor(model: model, meeting: model.meetings[0]))
@@ -76,8 +92,8 @@ struct DemoSnapshot: AsyncParsableCommand {
             size = CGSize(width: 610, height: 490)
             selectedView = AnyView(ScribeModelManagerView(model: model))
         case .intelligence:
-            size = CGSize(width: 610, height: 390)
-            selectedView = AnyView(ScribeAISettingsView(model: model))
+            size = CGSize(width: 640, height: 690)
+            selectedView = AnyView(ScribeAISettingsView(model: model, apiKeyOverride: ""))
         case .onboarding:
             size = CGSize(width: 760, height: 570)
             selectedView = AnyView(ScribeOnboardingView(model: model))

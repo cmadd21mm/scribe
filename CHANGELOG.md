@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.12
+
+- Completed an evidence-based light and dark mode design audit across Home,
+  onboarding, meetings, summary generation, Ask Scribe, Settings, model setup,
+  speaker naming, and renaming.
+- Added accessible names and guidance to primary navigation, recording, meeting,
+  transcript, AI, and toolbar controls; increased minimum supporting text size.
+- Raised the light-mode coral contrast above WCAG AA for small text and added
+  consistent pressed feedback to primary and secondary controls.
+- Replaced the subtle summary spinner with a clear progress card that names the
+  provider, shows elapsed time, explains the timeout, and confirms the current
+  note remains safe.
+- Added Decisions and Open Questions to meeting details, copied summaries, and
+  exported Markdown; long transcripts can now expand and collapse in place.
+- Replaced misleading always-success permission icons with current microphone
+  and calendar states, while explaining when system-audio access is checked.
+- Added unobtrusive confirmations for copy and export actions and strengthened
+  the affordance of Ask Scribe suggestions and AI model selection.
+- Made Venice Ask Scribe requests use the same responsive, no-web-search mode as
+  summaries, with visible elapsed time and a clear 120-second safety limit.
+- Moved Keychain reads off the main UI thread and surfaced Keychain approval
+  status, so a macOS authorization dialog can never make AI setup or Ask Scribe
+  look frozen.
+
 ## 0.2.11
 
 - Added a dedicated Home view that opens by default, with a prominent recording

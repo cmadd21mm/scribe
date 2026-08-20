@@ -41,7 +41,8 @@ enum ScribeTheme {
         dark: NSColor(red: 0.635, green: 0.585, blue: 0.600, alpha: 1)
     )
     static let coral = adaptive(
-        light: NSColor(red: 1.000, green: 0.365, blue: 0.270, alpha: 1),
+        // Dark enough for small text on the warm paper background (4.78:1).
+        light: NSColor(red: 0.780, green: 0.251, blue: 0.196, alpha: 1),
         dark: NSColor(red: 1.000, green: 0.445, blue: 0.355, alpha: 1)
     )
     static let divider = adaptive(
@@ -69,7 +70,9 @@ enum ScribeTheme {
     }
 
     static func sans(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .rounded)
+        // Instructional and state text should remain readable without relying
+        // on the user to zoom a fixed-size macOS sheet.
+        .system(size: max(size, 11), weight: weight, design: .rounded)
     }
 }
 
@@ -117,7 +120,9 @@ struct ScribePrimaryButtonStyle: ButtonStyle {
             .padding(.horizontal, 20)
             .padding(.vertical, 11)
             .background(ScribeTheme.button.opacity(configuration.isPressed ? 0.78 : 1))
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.82), value: configuration.isPressed)
             .scribePointer()
     }
 }
@@ -131,10 +136,12 @@ struct ScribeSecondaryButtonStyle: ButtonStyle {
             .padding(.vertical, 9)
             .background(ScribeTheme.surface.opacity(configuration.isPressed ? 0.45 : 0.68))
             .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(ScribeTheme.divider, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.82), value: configuration.isPressed)
             .scribePointer()
     }
 }
