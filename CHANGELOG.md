@@ -21,7 +21,7 @@
 
 ## 0.2.14
 
-- Restored Quill's reliable global system-output capture after a supported call
+- Restored reliable global system-output capture after a supported call
   is detected and the user explicitly chooses Record. This captures FaceTime's
   `avconferenced` audio and browser/meeting-app helper processes while excluding
   Scribe's own output.
@@ -38,7 +38,7 @@
 - Fixed the AppKit launch boundary so the application run loop no longer
   occupies Swift's MainActor executor. Recording, summary generation, Ask
   Scribe, and their timeout tasks can now execute from UI actions.
-- Restored Quill's proven capture-triggered microphone consent path instead of
+- Restored the proven capture-triggered microphone consent path instead of
   relying on a preflight that could report denial without presenting a prompt.
 - Start microphone capture before call-audio capture so its consent cannot be
   masked by a separate system-audio permission failure.

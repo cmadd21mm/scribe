@@ -158,8 +158,8 @@ struct Run: ParsableCommand {
         let root = Config.resolveRoot(cliOverride: out)
         let demo = self.demo
         // The custom synchronous process entry point invokes Run on the
-        // initial main thread, matching working Quill builds. NSApplication's
-        // run loop is therefore not nested inside a Swift MainActor task.
+        // initial main thread. NSApplication's run loop is therefore not
+        // nested inside a Swift MainActor task.
         try MainActor.assumeIsolated {
             try Self.runMain(root: root, demo: demo)
         }
@@ -405,9 +405,9 @@ final class AppController {
                 at: root,
                 minimumBytes: Config.minimumFreeDiskBytes()
             )
-            // Match Quill's proven permission path: actual AVAudioEngine input
-            // capture asks macOS for microphone access. A permission preflight
-            // can report denied without ever presenting or registering Scribe.
+            // Use actual AVAudioEngine input capture to ask macOS for
+            // microphone access. A permission preflight can report denied
+            // without ever presenting or registering Scribe.
             model.recordingStartDetail = "Starting microphone… macOS may ask for access."
             let newSession = try RecordingSession(root: root, context: context)
             try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())

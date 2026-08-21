@@ -12,3 +12,5 @@ Thank you for helping make private meeting notes accessible to more Mac users.
 Please preserve Scribe's product constraints: explicit recording consent,
 local files as the source of truth, no account requirement, and no silent
 network fallback.
+
+Maintainers preparing a public build should follow [RELEASING.md](RELEASING.md).
