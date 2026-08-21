@@ -56,9 +56,10 @@ pause them or use Focus when a clean call track matters.
 
 ## Download and install
 
-Download `Scribe.dmg` from the repository's **Releases** page, open it, and drag
-Scribe into Applications. The universal download supports both Apple silicon
-and Intel Macs running macOS 15 or newer. The first recording asks for:
+Open the [latest Scribe release](https://github.com/cmadd21mm/scribe/releases/latest),
+download the versioned `Scribe-<version>.dmg`, open it, and drag Scribe into
+Applications. The universal download supports both Apple silicon and Intel Macs
+running macOS 15 or newer. The first recording asks for:
 
 - Microphone access for your side
 - Screen & System Audio Recording for the other side
@@ -70,7 +71,8 @@ over the existing copy; updates are never forced.
 
 The release scripts support Apple Developer ID signing and notarization. Local
 builds are ad-hoc signed; macOS may ask you to confirm opening one through
-**System Settings → Privacy & Security**.
+**System Settings → Privacy & Security**. Maintainers can follow the complete
+[release checklist](RELEASING.md) for signed public builds and Sparkle updates.
 
 ## Build it yourself
 

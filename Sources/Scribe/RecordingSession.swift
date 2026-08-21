@@ -33,7 +33,7 @@ enum SystemAudioCapturePolicy {
     /// Meeting apps frequently hand audio to helper processes (FaceTime uses
     /// avconferenced; browsers use renderer/audio-service processes). Once a
     /// configured call app is confirmed and the user explicitly chooses
-    /// Record, capture the Mac's output mix just as the original Quill did.
+    /// Record, capture the Mac's output mix through the proven global path.
     /// Excluding Scribe avoids feeding its own playback back into a meeting.
     static func scope(
         processes: [AudioProcessSnapshot],
