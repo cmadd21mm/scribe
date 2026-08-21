@@ -5,6 +5,7 @@ import SwiftUI
 struct ScribeSettingsView: View {
     @ObservedObject var model: ScribeAppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var calendarAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -270,7 +271,9 @@ struct ScribeSettingsView: View {
                             title: "Calendars",
                             detail: "Optional: names notes from the current event.",
                             pane: "Privacy_Calendars",
-                            status: calendarPermission
+                            status: calendarPermission,
+                            buttonTitle: calendarPermissionButtonTitle,
+                            action: calendarPermissionAction
                         )
                     }
 
@@ -361,7 +364,7 @@ struct ScribeSettingsView: View {
     }
 
     private var calendarPermission: PermissionDisplay {
-        switch EKEventStore.authorizationStatus(for: .event) {
+        switch calendarAuthorizationStatus {
         case .authorized, .fullAccess, .writeOnly:
             return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
         case .notDetermined:
@@ -373,11 +376,22 @@ struct ScribeSettingsView: View {
         }
     }
 
+    private var calendarPermissionButtonTitle: String {
+        calendarAuthorizationStatus == .notDetermined ? "Allow…" : "Open Settings"
+    }
+
+    private var calendarPermissionAction: (() -> Void)? {
+        guard calendarAuthorizationStatus == .notDetermined else { return nil }
+        return { requestCalendarAccess() }
+    }
+
     private func permissionRow(
         title: String,
         detail: String,
         pane: String,
-        status: PermissionDisplay
+        status: PermissionDisplay,
+        buttonTitle: String = "Open Settings",
+        action: (() -> Void)? = nil
     ) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: status.symbol)
@@ -395,9 +409,26 @@ struct ScribeSettingsView: View {
                     .foregroundStyle(status.needsAction ? ScribeTheme.coral : ScribeTheme.mutedInk)
             }
             Spacer()
-            Button("Open Settings") { model.openPrivacySettings(pane) }
+            Button(buttonTitle) {
+                if let action {
+                    action()
+                } else {
+                    model.openPrivacySettings(pane)
+                }
+            }
                 .buttonStyle(ScribeSecondaryButtonStyle())
-                .accessibilityLabel("Open macOS settings for \(title)")
+                .accessibilityLabel(
+                    action == nil
+                        ? "Open macOS settings for \(title)"
+                        : "Allow Scribe to access \(title)"
+                )
+        }
+    }
+
+    private func requestCalendarAccess() {
+        Task { @MainActor in
+            _ = await CalendarService.requestAccess()
+            calendarAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
         }
     }
 }

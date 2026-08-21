@@ -4,7 +4,6 @@ import Foundation
 @MainActor
 final class CalendarService {
     private let store = EKEventStore()
-    private var reportedPermissionFailure = false
 
     func context(
         at date: Date,
@@ -16,7 +15,9 @@ final class CalendarService {
             sourceBundleID: sourceBundleID
         )
 
-        guard await ensureAccess() else { return fallback }
+        // Calendar naming is optional and must never delay or prevent a
+        // recording. Permission is requested explicitly from Settings.
+        guard Self.hasAccess else { return fallback }
         let predicate = store.predicateForEvents(
             withStart: date.addingTimeInterval(-12 * 60 * 60),
             end: date.addingTimeInterval(12 * 60 * 60),
@@ -46,35 +47,28 @@ final class CalendarService {
         )
     }
 
-    private func ensureAccess() async -> Bool {
+    static var hasAccess: Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         switch status {
         case .fullAccess, .authorized:
             return true
-        case .notDetermined:
-            do {
-                let granted = try await store.requestFullAccessToEvents()
-                if !granted { reportPermissionFailure() }
-                return granted
-            } catch {
-                reportPermissionFailure(detail: "\(error)")
-                return false
-            }
-        case .denied, .restricted, .writeOnly:
-            reportPermissionFailure()
+        case .notDetermined, .denied, .restricted, .writeOnly:
             return false
         @unknown default:
-            reportPermissionFailure()
             return false
         }
     }
 
-    private func reportPermissionFailure(detail: String? = nil) {
-        guard !reportedPermissionFailure else { return }
-        reportedPermissionFailure = true
-        let suffix = detail.map { " (\($0))" } ?? ""
-        let message = "Calendar access is unavailable\(suffix). Enable Scribe in System Settings → Privacy & Security → Calendars. Recording will continue with an app-and-time name."
-        FileHandle.standardError.write(Data("warning: \(message)\n".utf8))
-        notifyUser(title: "Scribe: calendar unavailable", body: message)
+    static func requestAccess() async -> Bool {
+        switch EKEventStore.authorizationStatus(for: .event) {
+        case .fullAccess, .authorized:
+            return true
+        case .notDetermined:
+            return (try? await EKEventStore().requestFullAccessToEvents()) == true
+        case .denied, .restricted, .writeOnly:
+            return false
+        @unknown default:
+            return false
+        }
     }
 }

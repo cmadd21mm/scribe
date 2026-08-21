@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class ScribeWindowController: NSWindowController, NSWindowDelegate {
+final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSApplicationDelegate {
     init(model: ScribeAppModel, demo: Bool) {
         let content = ScribeAppView(model: model)
         let hosting = NSHostingView(rootView: content)
@@ -34,6 +34,19 @@ final class ScribeWindowController: NSWindowController, NSWindowDelegate {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        if !flag { present() }
+        return true
+    }
+
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        present()
+        return true
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

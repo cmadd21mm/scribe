@@ -54,13 +54,22 @@ iconutil -c icns "$ICONSET_DIR" -o "$APP_DIR/Contents/Resources/Scribe.icns"
 rm -rf "$ICONSET_DIR"
 
 SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY:--}
+ENTITLEMENTS="$PROJECT_ROOT/Sources/Scribe/Scribe.entitlements"
 if [ "$SIGNING_IDENTITY" = "-" ]; then
     # Ad-hoc local builds have no Team ID, so hardened library validation
     # cannot establish that the app and Sparkle share a signer.
-    codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR"
+    codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+    codesign --force --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_DIR"
 else
-    codesign --force --deep --options runtime --sign "$SIGNING_IDENTITY" "$APP_DIR"
+    # Re-sign Sparkle with our Team ID for hardened library validation, then
+    # sign only the host app with Scribe's privacy-sensitive entitlements.
+    codesign --force --deep --options runtime --sign "$SIGNING_IDENTITY" "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+    codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP_DIR"
 fi
 codesign --verify --deep --strict "$APP_DIR"
+codesign -d --entitlements - "$APP_DIR" 2>&1 \
+    | grep -q "com.apple.security.device.audio-input"
+codesign -d --entitlements - "$APP_DIR" 2>&1 \
+    | grep -q "com.apple.security.personal-information.calendars"
 
 printf '%s\n' "$APP_DIR"

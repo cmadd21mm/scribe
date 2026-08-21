@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.13
+
+- Fixed release-build ownership so Scribe's main controller, window, recording
+  actions, and AI actions stay alive for the entire running application.
+- Fixed the macOS app lifecycle so clicking Scribe in the Dock or opening it
+  again always restores the main window after it has been closed.
+- Added standard untitled-file reopen handling so Finder and Launch Services
+  activation cannot leave Scribe running invisibly in the background.
+- Made command-line start, stop, and quit controls deliver immediately to the
+  running app instead of relying on a deferred distributed notification.
+- Removed optional Calendar permission from the recording critical path; it is
+  now requested only when the user chooses Allow in Settings.
+- Added the hardened-runtime Audio Input and Calendar entitlements required for
+  macOS to present privacy consent to a Developer-ID-signed Scribe build.
+- Corrected release signing so Sparkle is re-signed for library validation while
+  privacy entitlements are applied only to the Scribe host app.
+
 ## 0.2.12
 
 - Completed an evidence-based light and dark mode design audit across Home,
