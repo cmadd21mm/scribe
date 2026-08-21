@@ -7,7 +7,7 @@ affects: "microphone recording and speaker attribution"
 
 ## Context
 
-Quill records the default microphone through an `AVAudioEngine` input-node tap and records system playback through a separate Core Audio process tap. Commit `374e479` enabled `setVoiceProcessingEnabled(true)` on the input node to prevent speaker playback from appearing in both transcripts. Commit `0d294bc` added a 9-channel-to-mono `AVAudioConverter` after direct AAC writes from the 9-channel tap failed.
+The original capture implementation records the default microphone through an `AVAudioEngine` input-node tap and records system playback through a separate Core Audio process tap. Commit `374e479` enabled `setVoiceProcessingEnabled(true)` on the input node to prevent speaker playback from appearing in both transcripts. Commit `0d294bc` added a 9-channel-to-mono `AVAudioConverter` after direct AAC writes from the 9-channel tap failed.
 
 Apple's voice-processing mode is not an input effect. It replaces the engine's normal I/O with a duplex voice-processing I/O configuration. Enabling it on either I/O node automatically enables it on the other. The input node's output format and output node's input format must match, and the engine must render to an audio device [1](https://developer.apple.com/documentation/avfaudio/avaudioionode/setvoiceprocessingenabled%28_%3A%29). The underlying `VoiceProcessingIO` unit uses bus 0 for device output and bus 1 for processed device input [2](https://developer.apple.com/documentation/audiotoolbox/kaudiounitsubtype_voiceprocessingio).
 
@@ -26,7 +26,7 @@ The system-audio track remains independent and usable.
 
 ## RCA
 
-The root cause is incomplete VoiceProcessingIO graph and format configuration. Quill enables the duplex unit, immediately accepts `input.outputFormat(forBus: 0)` as its client format, and never establishes the output side of the graph. On the affected route, the inherited format is 9-channel/48 kHz. The subsequent `AVAudioConverter` is downstream of VoiceProcessingIO and cannot repair the unit's I/O configuration.
+The root cause is incomplete VoiceProcessingIO graph and format configuration. The inherited implementation enables the duplex unit, immediately accepts `input.outputFormat(forBus: 0)` as its client format, and never establishes the output side of the graph. On the affected route, the inherited format is 9-channel/48 kHz. The subsequent `AVAudioConverter` is downstream of VoiceProcessingIO and cannot repair the unit's I/O configuration.
 
 The working Apple graph does four things in order:
 
@@ -37,7 +37,7 @@ The working Apple graph does four things in order:
 
 Calling `setVoiceProcessingEnabled(true)` on `outputNode` remains unnecessary because enabling either I/O node enables both. Constructing and formatting the output render path is necessary.
 
-The 9-channel format is not the desired post-AEC speech format. It is the unconfigured client format inherited from the multichannel hardware or synthesized aggregate route. VoiceProcessingIO supports conversion between its hardware and client scopes, so Quill should request mono at the Voice I/O boundary instead of accepting nine channels and converting later. Apple's underlying unit defines a macOS error for unexpected hardware input channel counts [4](https://developer.apple.com/documentation/audiotoolbox/kauvoiceioerr_unexpectednumberofinputchannels), so a genuinely incompatible device may still fail and needs a raw-mic fallback.
+The 9-channel format is not the desired post-AEC speech format. It is the unconfigured client format inherited from the multichannel hardware or synthesized aggregate route. VoiceProcessingIO supports conversion between its hardware and client scopes, so Scribe should request mono at the Voice I/O boundary instead of accepting nine channels and converting later. Apple's underlying unit defines a macOS error for unexpected hardware input channel counts [4](https://developer.apple.com/documentation/audiotoolbox/kauvoiceioerr_unexpectednumberofinputchannels), so a genuinely incompatible device may still fail and needs a raw-mic fallback.
 
 The direct AAC failure is separate. Writing the inherited 9-channel buffers to the current AAC file fails. The mono converter fixes the file shape but leaves the VoiceProcessingIO misconfiguration in place, which explains why it creates a correctly timed silent file rather than restoring the microphone.
 
@@ -76,7 +76,7 @@ input.installTap(onBus: 0, bufferSize: 1024, format: voiceFormat) {
 }
 ```
 
-The mixer has no sources, so Quill does not monitor the microphone or add playback. Its connection exists to make VoiceProcessingIO a complete, rendered duplex graph.
+The mixer has no sources, so Scribe does not monitor the microphone or add playback. Its connection exists to make VoiceProcessingIO a complete, rendered duplex graph.
 
 Instrument the first corrected recording:
 
@@ -93,7 +93,7 @@ The result has a predetermined branch:
 
 Add a first-second liveness check before trusting the session. If callbacks arrive but their peak remains at digital zero, stop and recreate the engine with voice processing disabled. This protects recordings from silent framework failures without abandoning AEC on supported routes.
 
-Transcript-level echo suppression remains a fallback for unsupported devices, not the primary fix. Quill already has the clean far-end track and aligned timestamps. Mark a mic segment as echo only when it overlaps a system segment in time and has high fuzzy token similarity; preserve segments with substantial unique mic words so local interruptions and double-talk survive.
+Transcript-level echo suppression remains a fallback for unsupported devices, not the primary fix. Scribe already has the clean far-end track and aligned timestamps. Mark a mic segment as echo only when it overlaps a system segment in time and has high fuzzy token similarity; preserve segments with substantial unique mic words so local interruptions and double-talk survive.
 
 Direct `kAudioUnitSubType_VoiceProcessingIO` is unnecessary unless AVAudioEngine still fails after matching Apple's graph. It exposes the same unit with lower-level control.
 
