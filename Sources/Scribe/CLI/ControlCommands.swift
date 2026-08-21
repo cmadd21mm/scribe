@@ -10,10 +10,11 @@ enum ScribeControlNotification {
 
 private enum ControlClient {
     static func post(_ name: Notification.Name, userInfo: [String: Any]? = nil) {
-        DistributedNotificationCenter.default().post(
-            name: name,
+        DistributedNotificationCenter.default().postNotificationName(
+            name,
             object: nil,
-            userInfo: userInfo
+            userInfo: userInfo,
+            deliverImmediately: true
         )
     }
 }

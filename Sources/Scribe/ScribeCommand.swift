@@ -178,7 +178,16 @@ struct Run: AsyncParsableCommand {
         FileHandle.standardError.write(Data(
             "Scribe is open · recordings → \(root.path) · ^C to quit\n".utf8
         ))
-        app.run()
+        // `NSApplication` does not retain our controller, and its delegate is
+        // weak. Keep both the application controller and signal source alive
+        // for the complete AppKit run loop; optimized release builds may
+        // otherwise destroy the window and its action handlers while leaving
+        // an apparently running, unresponsive process behind.
+        withExtendedLifetime(controller) {
+            withExtendedLifetime(sigint) {
+                app.run()
+            }
+        }
     }
 }
 
@@ -249,6 +258,7 @@ final class AppController {
         model.onDownloadTranscriptionModel = { [weak self] selected in
             self?.downloadTranscriptionModel(selected)
         }
+        NSApp.delegate = windowController
         windowController.present()
 
         guard !demo else { return }
