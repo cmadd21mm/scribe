@@ -59,7 +59,7 @@ actor TranscriptionCoordinator {
         let fm = FileManager.default
         let pending = entries
             .filter {
-                fm.fileExists(atPath: $0.appendingPathComponent("meta.json").path)
+                Self.shouldResumeSession($0, fileManager: fm)
                     && !fm.fileExists(atPath: $0.appendingPathComponent("transcript.json").path)
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
@@ -72,6 +72,32 @@ actor TranscriptionCoordinator {
             ))
         }
         drainIfIdle()
+    }
+
+    /// Silent sessions are intentionally retained for troubleshooting but
+    /// must not be re-enqueued every time Scribe launches. Older 0.2.14
+    /// sessions did not have `has_usable_audio`, so recognize their two-track
+    /// silence warning as well.
+    static func shouldResumeSession(
+        _ dir: URL,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        let metadataURL = dir.appendingPathComponent("meta.json")
+        guard fileManager.fileExists(atPath: metadataURL.path),
+              let data = try? Data(contentsOf: metadataURL),
+              let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+
+        if metadata["has_usable_audio"] as? Bool == false { return false }
+        let warnings = Set(metadata["capture_warnings"] as? [String] ?? [])
+        if warnings.contains("microphone") && warnings.contains("call audio") {
+            return false
+        }
+
+        let files = metadata["files"] as? [String: String] ?? [:]
+        return files.values.contains {
+            fileManager.fileExists(atPath: dir.appendingPathComponent($0).path)
+        }
     }
 
     // MARK: -
@@ -140,6 +166,7 @@ actor TranscriptionCoordinator {
             }
         }
         merged.sort { $0.start_ms < $1.start_ms }
+        merged = TranscriptEchoDeduplicator.removingCrossTrackEcho(from: merged)
 
         let transcript = Transcript(
             engine: engine.name,
@@ -185,6 +212,43 @@ actor TranscriptionCoordinator {
 
     private func publish(_ status: Status) {
         statusHandler?(status)
+    }
+}
+
+/// Speaker playback can leak into the microphone when the user records over
+/// Mac speakers with voice processing disabled. Both recognizers then return
+/// nearly the same sentence at the same moment. Prefer the clean system track
+/// for long, strongly matching overlaps while preserving short acknowledgments
+/// and genuine repetitions later in the conversation.
+enum TranscriptEchoDeduplicator {
+    static func removingCrossTrackEcho(
+        from segments: [Transcript.Segment]
+    ) -> [Transcript.Segment] {
+        let remote = segments.filter { $0.speaker == "them" }
+        return segments.filter { candidate in
+            guard candidate.speaker == "me" else { return true }
+            let candidateWords = words(candidate.text)
+            guard candidateWords.count >= 4 else { return true }
+
+            let isEcho = remote.contains { other in
+                guard abs(other.start_ms - candidate.start_ms) <= 1_000,
+                      max(other.start_ms, candidate.start_ms)
+                        <= min(other.end_ms, candidate.end_ms) + 500
+                else { return false }
+                let otherWords = words(other.text)
+                guard otherWords.count >= 4 else { return false }
+                let shorter = min(candidateWords.count, otherWords.count)
+                let longer = max(candidateWords.count, otherWords.count)
+                guard Double(shorter) / Double(longer) >= 0.65 else { return false }
+                let overlap = candidateWords.intersection(otherWords).count
+                return Double(overlap) / Double(shorter) >= 0.8
+            }
+            return !isEcho
+        }
+    }
+
+    private static func words(_ text: String) -> Set<String> {
+        Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init))
     }
 }
 

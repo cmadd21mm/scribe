@@ -3,7 +3,7 @@
 **Stay in the conversation.**
 
 Scribe is a free, open-source, local-first meeting notes app for macOS. Choose
-**Record** and it captures your microphone and the call app as separate tracks,
+**Record** and it captures your microphone and Mac system output as separate tracks,
 transcribes both sides on your Mac, and keeps the audio, transcript, summary,
 actions, and your own notes together in plain files.
 
@@ -13,7 +13,7 @@ actions, and your own notes together in plain files.
 
 - **You decide when to record.** Scribe can notice a supported call and offer a
   Record / Not now prompt, but it never starts on its own.
-- **Both sides are clear.** Your microphone and the selected call process are
+- **Both sides are clear.** Your microphone and system output are
   captured separately for dependable speaker labels.
 - **Useful after the call.** Search every note, rename or trash meetings, copy a
   summary, check off action items, add personal context, play the recording, or
@@ -36,7 +36,9 @@ actions, and your own notes together in plain files.
 
 ## Supported calls
 
-Scribe ships with capture profiles for:
+The **Record** button works with any conferencing app because capture does not
+depend on a vendor integration, meeting bot, browser extension, or a specific
+helper-process name. Scribe ships with automatic call-prompt profiles for:
 
 - Zoom
 - Microsoft Teams (new and classic)
@@ -46,10 +48,11 @@ Scribe ships with capture profiles for:
 - Webex
 - Discord
 
-Scribe uses a non-global Core Audio process tap, so unrelated apps such as
-Spotify are excluded. macOS isolates browser processes rather than individual
-tabs; use a dedicated meeting window or profile when browser-tab isolation is
-important.
+After you explicitly choose Record, Scribe uses Apple's system-output capture
+API so audio routed through FaceTime's `avconferenced`, Chromium renderers,
+Electron helpers, and similar services is not lost. Other sounds the Mac plays
+during the recording—such as notifications or music—can therefore be included;
+pause them or use Focus when a clean call track matters.
 
 ## Download and install
 

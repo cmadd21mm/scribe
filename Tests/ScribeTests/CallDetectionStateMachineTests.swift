@@ -32,6 +32,47 @@ struct CallDetectionStateMachineTests {
         ).isEmpty)
     }
 
+    @Test("Microphone use prompts even when call output belongs to a helper")
+    func inputIsSufficientForPrompt() {
+        var machine = CallDetectionStateMachine(promptAfter: 0, endAfter: 10)
+        let now = Date(timeIntervalSince1970: 100)
+        let inputOnly = [process(input: true, output: false)]
+        #expect(machine.update(processes: inputOnly, now: now).isEmpty)
+        #expect(machine.update(processes: inputOnly, now: now) == [
+            .prompt(LiveCall(bundleID: "us.zoom.xos", processObjectIDs: [7]))
+        ])
+    }
+
+    @Test("Browser input and output helpers combine into one canonical call")
+    func splitBrowserHelpers() {
+        let raw = [
+            process(
+                id: 7,
+                bundleID: "com.google.Chrome.helper.audio",
+                input: true,
+                output: false
+            ),
+            process(
+                id: 8,
+                bundleID: "com.google.Chrome.helper.renderer",
+                input: false,
+                output: true
+            ),
+        ]
+        let configured = LiveCallFinder.configuredCalls(
+            in: raw,
+            allowedBundleIDs: ["com.google.Chrome"]
+        )
+        #expect(configured.map(\.bundleID) == ["com.google.Chrome", "com.google.Chrome"])
+
+        var machine = CallDetectionStateMachine(promptAfter: 0, endAfter: 10)
+        let now = Date(timeIntervalSince1970: 100)
+        #expect(machine.update(processes: configured, now: now).isEmpty)
+        #expect(machine.update(processes: configured, now: now) == [
+            .prompt(LiveCall(bundleID: "com.google.Chrome", processObjectIDs: [7, 8]))
+        ])
+    }
+
     @Test("Declining suppresses prompts until the call ends")
     func declinedCallDoesNotReprompt() {
         var machine = CallDetectionStateMachine(promptAfter: 1, endAfter: 10)
@@ -67,11 +108,16 @@ struct CallDetectionStateMachineTests {
         ])
     }
 
-    private func process(input: Bool, output: Bool) -> AudioProcessSnapshot {
+    private func process(
+        id: AudioObjectID = 7,
+        bundleID: String = "us.zoom.xos",
+        input: Bool,
+        output: Bool
+    ) -> AudioProcessSnapshot {
         AudioProcessSnapshot(
-            objectID: AudioObjectID(7),
+            objectID: id,
             pid: 99,
-            bundleID: "us.zoom.xos",
+            bundleID: bundleID,
             isRunningInput: input,
             isRunningOutput: output
         )

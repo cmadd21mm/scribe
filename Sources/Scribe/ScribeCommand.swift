@@ -451,7 +451,8 @@ final class AppController {
         }
         let configured = LiveCallFinder.configuredCalls(
             in: snapshots,
-            allowedBundleIDs: Config.callAppBundleIDs()
+            allowedBundleIDs: Config.callAppBundleIDs(),
+            runningBundleIDs: AudioProcessDiscovery.runningApplicationBundleIDs()
         )
         for action in detector.update(processes: configured, now: Date()) {
             switch action {

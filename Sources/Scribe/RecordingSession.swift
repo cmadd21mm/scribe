@@ -3,11 +3,24 @@ import Foundation
 struct RecordingCaptureHealth: Equatable, Sendable {
     let microphone: AudioSignalStatus
     let systemAudio: AudioSignalStatus?
+    let expectsSystemAudio: Bool
+
+    init(
+        microphone: AudioSignalStatus,
+        systemAudio: AudioSignalStatus?,
+        expectsSystemAudio: Bool = true
+    ) {
+        self.microphone = microphone
+        self.systemAudio = systemAudio
+        self.expectsSystemAudio = expectsSystemAudio
+    }
 
     var missingTracks: [String] {
         var result: [String] = []
         if !microphone.hasSignal { result.append("microphone") }
-        if let systemAudio, !systemAudio.hasSignal { result.append("call audio") }
+        if expectsSystemAudio, let systemAudio, !systemAudio.hasSignal {
+            result.append("call audio")
+        }
         return result
     }
 
@@ -71,27 +84,22 @@ final class RecordingSession: @unchecked Sendable {
         try writeMetadata(state: "recording", endedAt: nil)
     }
 
-    /// Start both tracks. If the mic fails after the system tap started, the
-    /// tap is torn down so we never run half a session silently.
+    /// Start both tracks. If system-output capture fails after the microphone
+    /// started, the microphone is torn down so the UI can report the failure
+    /// instead of running a misleading half-session.
     func start(allowedBundleIDs: Set<String> = Config.callAppBundleIDs()) throws {
         let processes = try AudioProcessDiscovery.snapshots()
+        let runningBundleIDs = AudioProcessDiscovery.runningApplicationBundleIDs()
         let targets = AudioProcessSelector.captureTargets(
             from: processes,
-            allowedBundleIDs: allowedBundleIDs
+            allowedBundleIDs: allowedBundleIDs,
+            runningBundleIDs: runningBundleIDs
         )
         if sourceBundleID == nil {
             let activeBundleIDs = Set(targets.compactMap(\.bundleID))
             if activeBundleIDs.count == 1 { sourceBundleID = activeBundleIDs.first }
         }
-        guard !targets.isEmpty else {
-            captureKind = "in_person"
-            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
-            try? writeMetadata(state: "recording", endedAt: nil)
-            startWatchdog()
-            return
-        }
-
-        captureKind = "online"
+        captureKind = sourceBundleID != nil || !targets.isEmpty ? "online" : "unknown"
         // Start the microphone first so macOS can present its consent prompt
         // before a separate system-audio permission interrupts startup.
         try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
@@ -125,7 +133,16 @@ final class RecordingSession: @unchecked Sendable {
     func stop() -> RecordingCaptureHealth {
         watchdog?.invalidate()
         watchdog = nil
-        let health = captureHealth()
+        let microphoneStatus = mic.signalStatus
+        let systemStatus = capturesSystemAudio ? system.signalStatus : nil
+        if captureKind == "unknown" {
+            captureKind = systemStatus?.hasSignal == true ? "online" : "in_person"
+        }
+        let health = RecordingCaptureHealth(
+            microphone: microphoneStatus,
+            systemAudio: systemStatus,
+            expectsSystemAudio: captureKind == "online"
+        )
         mic.stop()
         system.stop()
 
@@ -144,7 +161,8 @@ final class RecordingSession: @unchecked Sendable {
                 "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
                 "system": Int(systemStart.timeIntervalSince(earliest) * 1000),
             ],
-            captureWarnings: health.missingTracks
+            captureWarnings: health.missingTracks,
+            hasUsableAudio: health.hasAnySignal
         )
         return health
     }
@@ -152,7 +170,8 @@ final class RecordingSession: @unchecked Sendable {
     func captureHealth() -> RecordingCaptureHealth {
         RecordingCaptureHealth(
             microphone: mic.signalStatus,
-            systemAudio: capturesSystemAudio ? system.signalStatus : nil
+            systemAudio: capturesSystemAudio ? system.signalStatus : nil,
+            expectsSystemAudio: captureKind == "online"
         )
     }
 
@@ -160,7 +179,8 @@ final class RecordingSession: @unchecked Sendable {
         state: String,
         endedAt: Date?,
         startOffsets: [String: Int] = ["mic": 0, "system": 0],
-        captureWarnings: [String] = []
+        captureWarnings: [String] = [],
+        hasUsableAudio: Bool? = nil
     ) throws {
         let iso = ISO8601DateFormatter()
         var files = ["mic": "mic.caf"]
@@ -177,6 +197,7 @@ final class RecordingSession: @unchecked Sendable {
             "source_bundle_id": sourceBundleID ?? NSNull(),
             "capture_kind": captureKind,
             "capture_warnings": captureWarnings,
+            "has_usable_audio": hasUsableAudio.map { $0 as Any } ?? NSNull(),
             "files": files,
             "start_offset_ms": startOffsets,
         ]
