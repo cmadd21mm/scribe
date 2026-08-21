@@ -48,6 +48,8 @@ final class MicRecorder: @unchecked Sendable {
         var livenessFrames = 0
         var livenessPeak: Float = 0
         var livenessSettled = false
+        var silenceRecoveryAttempted = false
+        var unrecoverableSilence = false
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
@@ -67,11 +69,26 @@ final class MicRecorder: @unchecked Sendable {
         set { state.withLock { $0.lastBufferAt = newValue } }
     }
 
+    var signalStatus: AudioSignalStatus {
+        state.withLock {
+            AudioSignalStatus(capturedFrames: Int64($0.livenessFrames), peak: $0.livenessPeak)
+        }
+    }
+
     /// Start capturing the mic, encoding AAC into `url` (use a .caf extension
     /// — CAF needs no finalization pass, so a crash loses nothing written).
     func start(writingTo url: URL) throws {
         guard !isRecording else { return }
         self.url = url
+        state.withLock {
+            $0.firstBufferAt = nil
+            $0.lastBufferAt = nil
+            $0.livenessFrames = 0
+            $0.livenessPeak = 0
+            $0.livenessSettled = false
+            $0.silenceRecoveryAttempted = false
+            $0.unrecoverableSilence = false
+        }
         try attach(voiceProcessing: Config.micVoiceProcessing())
         isRecording = true
         configObserver = NotificationCenter.default.addObserver(
@@ -110,6 +127,12 @@ final class MicRecorder: @unchecked Sendable {
         let input = engine.inputNode
 
         var voice = voiceProcessing
+        state.withLock {
+            $0.livenessFrames = 0
+            $0.livenessPeak = 0
+            $0.livenessSettled = false
+        }
+
         if voice {
             do {
                 try input.setVoiceProcessingEnabled(true)
@@ -179,11 +202,6 @@ final class MicRecorder: @unchecked Sendable {
             // has no sources — nothing is monitored or played — its connection
             // exists solely to give the unit a formatted output path.
             engine.connect(engine.mainMixerNode, to: engine.outputNode, format: monoFormat)
-            state.withLock {
-                $0.livenessFrames = 0
-                $0.livenessPeak = 0
-                $0.livenessSettled = false
-            }
             installVoiceTap(on: input, format: monoFormat)
         } else {
             try installRawTap(on: input, inputFormat: inputFormat, monoFormat: monoFormat)
@@ -205,11 +223,10 @@ final class MicRecorder: @unchecked Sendable {
 
     /// Voice-processing path: the unit converts to the mono client format
     /// itself, so tapped buffers write straight to the file. Tracks signal
-    /// peak over the first second — an unsupported route (device pair, macOS
+    /// peak over the first two seconds — an unsupported route (device pair, macOS
     /// AUVPAggregate defects) delivers callbacks full of digital zeros, and
     /// the only recovery is restarting raw.
     private func installVoiceTap(on input: AVAudioInputNode, format: AVAudioFormat) {
-        let checkFrames = Int(format.sampleRate)
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
             guard let self, let file = self.file else { return }
             let now = Date()
@@ -218,23 +235,9 @@ final class MicRecorder: @unchecked Sendable {
                 $0.lastBufferAt = now
             }
 
-            let shouldFallBack = self.state.withLock { state in
-                guard !state.livenessSettled else { return false }
-                let frames = Int(buffer.frameLength)
-                if let data = buffer.floatChannelData?[0] {
-                    for index in 0..<frames {
-                        state.livenessPeak = max(state.livenessPeak, abs(data[index]))
-                    }
-                }
-                state.livenessFrames += frames
-                if state.livenessFrames >= checkFrames {
-                    state.livenessSettled = true
-                    return state.livenessPeak <= 0.000_001
-                }
-                return false
-            }
-            if shouldFallBack {
-                DispatchQueue.main.async { self.fallBackToRaw() }
+            let action = self.observeLiveness(buffer, sampleRate: format.sampleRate)
+            if action == .recover {
+                DispatchQueue.main.async { self.recoverFromSilence(currentlyUsingVoice: true) }
                 return
             }
 
@@ -292,10 +295,48 @@ final class MicRecorder: @unchecked Sendable {
                     }
                     if let conversionError { throw conversionError }
                 }
+                let action = self.observeLiveness(mono, sampleRate: monoFormat.sampleRate)
+                if action == .recover {
+                    DispatchQueue.main.async {
+                        self.recoverFromSilence(currentlyUsingVoice: false)
+                    }
+                    return
+                }
                 try file.write(from: mono)
             } catch {
                 FileHandle.standardError.write(Data("mic track write failed: \(error)\n".utf8))
             }
+        }
+    }
+
+    private enum LivenessAction {
+        case none
+        case recover
+        case failed
+    }
+
+    /// Observe every mic path, including raw capture. FaceTime can leave the
+    /// default input route connected while returning buffers made entirely of
+    /// digital zero. Two seconds is long enough to identify that broken route;
+    /// an idle physical microphone still has a measurable noise floor.
+    private func observeLiveness(
+        _ buffer: AVAudioPCMBuffer,
+        sampleRate: Double
+    ) -> LivenessAction {
+        let peak = AudioSignalStatus.peak(in: buffer)
+        return state.withLock { state in
+            guard !state.livenessSettled else { return .none }
+            state.livenessFrames += Int(buffer.frameLength)
+            state.livenessPeak = max(state.livenessPeak, peak)
+            guard state.livenessFrames >= Int(sampleRate * 2) else { return .none }
+            state.livenessSettled = true
+            guard state.livenessPeak <= 0.000_001 else { return .none }
+            if !state.silenceRecoveryAttempted {
+                state.silenceRecoveryAttempted = true
+                return .recover
+            }
+            state.unrecoverableSilence = true
+            return .failed
         }
     }
 
@@ -358,13 +399,15 @@ final class MicRecorder: @unchecked Sendable {
         }
     }
 
-    /// The voice-processing route delivered a full second of digital silence:
-    /// tear the engine down and restart raw, discarding the silent prefix so
-    /// the track's timestamps start at real audio.
-    private func fallBackToRaw() {
+    /// A route delivered digital silence. Retry once using the other capture
+    /// mode: raw → VoiceProcessingIO is important for FaceTime's aggregate
+    /// device, while VoiceProcessingIO → raw remains the safest recovery for
+    /// ordinary hardware and third-party meeting apps.
+    private func recoverFromSilence(currentlyUsingVoice: Bool) {
         guard isRecording else { return }
         FileHandle.standardError.write(Data(
-            "warning: voice processing delivered silence — restarting mic raw\n".utf8
+            "warning: mic delivered digital silence — retrying "
+                .appending(currentlyUsingVoice ? "raw\n" : "with voice processing\n").utf8
         ))
         engine.stop()
         engine.inputNode.removeTap(onBus: 0)
@@ -377,12 +420,13 @@ final class MicRecorder: @unchecked Sendable {
             try? FileManager.default.removeItem(at: url)
         }
         do {
-            try attach(voiceProcessing: false)
+            try attach(voiceProcessing: !currentlyUsingVoice)
         } catch {
             FileHandle.standardError.write(Data(
-                "mic raw fallback failed: \(error) — session continues without mic track\n".utf8
+                "mic silence recovery failed: \(error) — capture health check will report it\n".utf8
             ))
             file = nil
+            state.withLock { $0.unrecoverableSilence = true }
         }
     }
 }

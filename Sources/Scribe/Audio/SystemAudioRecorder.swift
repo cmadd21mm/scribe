@@ -3,12 +3,17 @@ import CoreAudio
 import Foundation
 import os.lock
 
-/// Records all system audio output to a file via a Core Audio process tap
-/// (macOS 14.2+). No virtual device, no kernel extension — the tap mixes every
-/// process's output to stereo and hands us buffers through a private aggregate
+/// Records system audio output to a file via a Core Audio process tap
+/// (macOS 14.2+). No virtual device, no kernel extension — the tap mixes the
+/// requested output to stereo and hands us buffers through a private aggregate
 /// device. First use triggers the one-time "System Audio Recording" TCC prompt
 /// and lights the purple recording indicator while active.
 final class SystemAudioRecorder {
+    enum CaptureScope: Equatable {
+        case processes([AudioObjectID])
+        case allSystemAudio(excluding: [AudioObjectID])
+    }
+
     enum RecorderError: Error, CustomStringConvertible {
         case tapCreationFailed(OSStatus)
         case tapFormatUnreadable(OSStatus)
@@ -43,6 +48,8 @@ final class SystemAudioRecorder {
         var file: AVAudioFile?
         var firstBufferAt: Date?
         var lastBufferAt: Date?
+        var capturedFrames: Int64 = 0
+        var peak: Float = 0
     }
     private let state = OSAllocatedUnfairLock(initialState: LockedState())
 
@@ -62,17 +69,38 @@ final class SystemAudioRecorder {
         set { state.withLock { $0.lastBufferAt = newValue } }
     }
 
+    var signalStatus: AudioSignalStatus {
+        state.withLock {
+            AudioSignalStatus(capturedFrames: $0.capturedFrames, peak: $0.peak)
+        }
+    }
+
     /// Start capturing system audio, encoding AAC into `url` (use a .caf
     /// extension — CAF needs no finalization pass, so a crash mid-meeting
     /// loses nothing already written).
-    func start(writingTo url: URL, processObjectIDs: [AudioObjectID]) throws {
+    func start(writingTo url: URL, scope: CaptureScope) throws {
         guard !isRecording else { return }
-        guard !processObjectIDs.isEmpty else { throw RecorderError.noEligibleProcesses }
 
-        let description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+        let description: CATapDescription
+        switch scope {
+        case .processes(let processObjectIDs):
+            guard !processObjectIDs.isEmpty else { throw RecorderError.noEligibleProcesses }
+            description = CATapDescription(stereoMixdownOfProcesses: processObjectIDs)
+        case .allSystemAudio(let excludedProcessObjectIDs):
+            description = CATapDescription(
+                stereoGlobalTapButExcludeProcesses: excludedProcessObjectIDs
+            )
+        }
         description.name = "Scribe system tap"
         description.isPrivate = true
         description.muteBehavior = .unmuted
+
+        state.withLock {
+            $0.firstBufferAt = nil
+            $0.lastBufferAt = nil
+            $0.capturedFrames = 0
+            $0.peak = 0
+        }
 
         var newTapID = AudioObjectID(kAudioObjectUnknown)
         let status = AudioHardwareCreateProcessTap(description, &newTapID)
@@ -172,6 +200,11 @@ final class SystemAudioRecorder {
                 bufferListNoCopy: inInputData,
                 deallocator: nil
             ) else { return }
+            let peak = AudioSignalStatus.peak(in: buffer)
+            self.state.withLock {
+                $0.capturedFrames += Int64(buffer.frameLength)
+                $0.peak = max($0.peak, peak)
+            }
             do {
                 try file.write(from: buffer)
             } catch {

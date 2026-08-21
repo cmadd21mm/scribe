@@ -259,11 +259,13 @@ struct ScribeSettingsView: View {
                             title: "Microphone",
                             detail: "Captures your side of a conversation.",
                             pane: "Privacy_Microphone",
-                            status: microphonePermission
+                            status: microphonePermission,
+                            buttonTitle: microphonePermissionButtonTitle,
+                            action: microphonePermissionAction
                         )
                         permissionRow(
                             title: "Screen & System Audio",
-                            detail: "Captures the other side from the chosen call app.",
+                            detail: "Captures call audio and other sounds playing on this Mac while you record.",
                             pane: "Privacy_ScreenCapture",
                             status: .init(text: "Checked when you record", symbol: "waveform.badge.magnifyingglass", needsAction: false)
                         )
@@ -355,11 +357,29 @@ struct ScribeSettingsView: View {
         case .authorized:
             return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
         case .notDetermined:
-            return .init(text: "Asked on first recording", symbol: "questionmark.shield", needsAction: false)
+            return .init(text: "Requested when you record", symbol: "questionmark.circle", needsAction: false)
         case .denied, .restricted:
             return .init(text: "Needs access", symbol: "exclamationmark.shield", needsAction: true)
         @unknown default:
             return .init(text: "Check access", symbol: "questionmark.shield", needsAction: true)
+        }
+    }
+
+    private var microphonePermissionButtonTitle: String {
+        AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+            ? "Record to allow…"
+            : "Open Settings"
+    }
+
+    private var microphonePermissionAction: (() -> Void)? {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else {
+            return nil
+        }
+        return {
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                model.requestToggleRecording()
+            }
         }
     }
 

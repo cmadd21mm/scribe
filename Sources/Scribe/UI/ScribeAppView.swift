@@ -1042,7 +1042,7 @@ private struct ScribeHome: View {
 
     private var recordingDetail: String {
         if model.isRecording { return "Scribe is saving this conversation locally on your Mac." }
-        if model.isStartingRecording { return "Checking microphone and system-audio access." }
+        if model.isStartingRecording { return model.recordingStartDetail }
         return "Works for in-person conversations, Google Meet, Zoom, Teams, and other call apps."
     }
 

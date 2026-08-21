@@ -582,6 +582,7 @@ final class ScribeAppModel: ObservableObject {
     @Published var searchText = ""
     @Published var isRecording = false
     @Published var isStartingRecording = false
+    @Published var recordingStartDetail = "Checking microphone and system-audio access."
     @Published var recordingElapsed = "0:00"
     @Published var transcriptionStatus: String?
     @Published var showSettings = false
@@ -693,12 +694,23 @@ final class ScribeAppModel: ObservableObject {
         guard !isStartingRecording else { return }
         showHome()
         isStartingRecording = true
+        recordingStartDetail = "Contacting the recording controller…"
         guard let onToggleRecording else {
             isStartingRecording = false
             alertMessage = "Scribe couldn’t reach its recording controller. Quit and reopen Scribe, then try again."
             return
         }
         onToggleRecording()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      self.isStartingRecording,
+                      self.recordingStartDetail == "Contacting the recording controller…"
+                else { return }
+                self.isStartingRecording = false
+                self.alertMessage = "Scribe couldn’t start its recording service. Quit and reopen Scribe, then try again."
+            }
+        }
     }
 
     func changeRoot(_ url: URL) {

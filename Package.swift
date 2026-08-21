@@ -20,7 +20,7 @@ let package = Package(
                 .product(name: "FluidAudio", package: "FluidAudio"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "Scribe.entitlements"],
             linkerSettings: [
                 .linkedFramework("Security"),
                 // Embed Info.plist into the binary so TCC can attribute the
