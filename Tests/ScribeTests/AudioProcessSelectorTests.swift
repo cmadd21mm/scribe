@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreAudio
 import Testing
 
@@ -31,6 +32,47 @@ struct AudioProcessSelectorTests {
             allowedBundleIDs: ["call"]
         )
         #expect(selected.map(\.pid) == [10, 50])
+    }
+
+    @Test("System capture includes helper processes but excludes Scribe itself")
+    func globalMeetingCaptureScope() {
+        let processes = [
+            snapshot(7, pid: 42, bundleID: "com.cmadd21mm.scribe", input: false, output: true),
+            snapshot(8, pid: 77, bundleID: "com.apple.FaceTime", input: true, output: true),
+            snapshot(9, pid: 88, bundleID: nil, input: false, output: true),
+        ]
+
+        let scope = SystemAudioCapturePolicy.scope(processes: processes, currentPID: 42)
+        #expect(scope == .allSystemAudio(excluding: [7]))
+    }
+
+    @Test("Signal measurement distinguishes digital zero from audible audio")
+    func signalMeasurement() throws {
+        let format = try #require(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 2,
+            interleaved: false
+        ))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4))
+        buffer.frameLength = 4
+
+        #expect(AudioSignalStatus.peak(in: buffer) == 0)
+        buffer.floatChannelData?[1][2] = -0.25
+        #expect(AudioSignalStatus.peak(in: buffer) == 0.25)
+
+        #expect(!AudioSignalStatus(capturedFrames: 4, peak: 0).hasSignal)
+        #expect(AudioSignalStatus(capturedFrames: 4, peak: 0.25).hasSignal)
+    }
+
+    @Test("Capture health accepts either usable track and reports silent tracks")
+    func captureHealthPolicy() {
+        let health = RecordingCaptureHealth(
+            microphone: AudioSignalStatus(capturedFrames: 96_000, peak: 0),
+            systemAudio: AudioSignalStatus(capturedFrames: 96_000, peak: 0.2)
+        )
+        #expect(health.hasAnySignal)
+        #expect(health.missingTracks == ["microphone"])
     }
 
     private func snapshot(

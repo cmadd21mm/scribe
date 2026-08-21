@@ -1,5 +1,38 @@
 import Foundation
 
+struct RecordingCaptureHealth: Equatable, Sendable {
+    let microphone: AudioSignalStatus
+    let systemAudio: AudioSignalStatus?
+
+    var missingTracks: [String] {
+        var result: [String] = []
+        if !microphone.hasSignal { result.append("microphone") }
+        if let systemAudio, !systemAudio.hasSignal { result.append("call audio") }
+        return result
+    }
+
+    var hasAnySignal: Bool {
+        microphone.hasSignal || systemAudio?.hasSignal == true
+    }
+}
+
+enum SystemAudioCapturePolicy {
+    /// Meeting apps frequently hand audio to helper processes (FaceTime uses
+    /// avconferenced; browsers use renderer/audio-service processes). Once a
+    /// configured call app is confirmed and the user explicitly chooses
+    /// Record, capture the Mac's output mix just as the original Quill did.
+    /// Excluding Scribe avoids feeding its own playback back into a meeting.
+    static func scope(
+        processes: [AudioProcessSnapshot],
+        currentPID: pid_t = getpid()
+    ) -> SystemAudioRecorder.CaptureScope {
+        let ownProcessObjects = processes
+            .filter { $0.pid == currentPID }
+            .map(\.objectID)
+        return .allSystemAudio(excluding: ownProcessObjects)
+    }
+}
+
 /// One meeting recording: a timestamped folder holding two independent tracks
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
 /// are separate on purpose — whisper does better on clean single-source audio,
@@ -16,11 +49,9 @@ final class RecordingSession: @unchecked Sendable {
     private var capturesSystemAudio = false
 
     private var watchdog: Timer?
-    private var trackSize: [String: Int64] = [:]
-    private var trackLastGrew: [String: Date] = [:]
-    private var trackStalled: Set<String> = []
-    private static let watchdogInterval: TimeInterval = 15
-    private static let stallThreshold: TimeInterval = 45
+    private var warnedTracks: Set<String> = []
+    private static let watchdogInterval: TimeInterval = 5
+    private static let signalWarningDelay: TimeInterval = 12
 
     /// Create the session folder under `root` (yyyy.MM.dd-HHmm, suffixed on
     /// collision) without starting capture yet.
@@ -61,15 +92,17 @@ final class RecordingSession: @unchecked Sendable {
         }
 
         captureKind = "online"
-        try system.start(
-            writingTo: dir.appendingPathComponent("system.caf"),
-            processObjectIDs: targets.map(\.objectID)
-        )
-        capturesSystemAudio = true
+        // Start the microphone first so macOS can present its consent prompt
+        // before a separate system-audio permission interrupts startup.
+        try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
         do {
-            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
+            try system.start(
+                writingTo: dir.appendingPathComponent("system.caf"),
+                scope: SystemAudioCapturePolicy.scope(processes: processes)
+            )
+            capturesSystemAudio = true
         } catch {
-            system.stop()
+            mic.stop()
             capturesSystemAudio = false
             throw error
         }
@@ -86,10 +119,13 @@ final class RecordingSession: @unchecked Sendable {
         }
     }
 
-    /// Stop both tracks and write meta.json.
-    func stop() {
+    /// Stop both tracks, write meta.json, and return whether each expected
+    /// track contained a real signal rather than merely valid silent packets.
+    @discardableResult
+    func stop() -> RecordingCaptureHealth {
         watchdog?.invalidate()
         watchdog = nil
+        let health = captureHealth()
         mic.stop()
         system.stop()
 
@@ -107,14 +143,24 @@ final class RecordingSession: @unchecked Sendable {
             startOffsets: [
                 "mic": Int(micStart.timeIntervalSince(earliest) * 1000),
                 "system": Int(systemStart.timeIntervalSince(earliest) * 1000),
-            ]
+            ],
+            captureWarnings: health.missingTracks
+        )
+        return health
+    }
+
+    func captureHealth() -> RecordingCaptureHealth {
+        RecordingCaptureHealth(
+            microphone: mic.signalStatus,
+            systemAudio: capturesSystemAudio ? system.signalStatus : nil
         )
     }
 
     private func writeMetadata(
         state: String,
         endedAt: Date?,
-        startOffsets: [String: Int] = ["mic": 0, "system": 0]
+        startOffsets: [String: Int] = ["mic": 0, "system": 0],
+        captureWarnings: [String] = []
     ) throws {
         let iso = ISO8601DateFormatter()
         var files = ["mic": "mic.caf"]
@@ -130,6 +176,7 @@ final class RecordingSession: @unchecked Sendable {
             "calendar_event_id": context.calendarEventID ?? NSNull(),
             "source_bundle_id": sourceBundleID ?? NSNull(),
             "capture_kind": captureKind,
+            "capture_warnings": captureWarnings,
             "files": files,
             "start_offset_ms": startOffsets,
         ]
@@ -164,30 +211,13 @@ final class RecordingSession: @unchecked Sendable {
     }
 
     private func checkTrackLiveness() {
-        let now = Date()
-        for name in ["mic", "system"] {
-            let path = dir.appendingPathComponent("\(name).caf").path
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
-                  let size = attributes[.size] as? Int64 else { continue }
-
-            if size != trackSize[name] {
-                trackSize[name] = size
-                trackLastGrew[name] = now
-                if trackStalled.remove(name) != nil {
-                    notifyUser(
-                        title: "Scribe: \(name) track recovered",
-                        body: "\(name.capitalized) audio is being written again."
-                    )
-                }
-            } else if let last = trackLastGrew[name],
-                      !trackStalled.contains(name),
-                      now.timeIntervalSince(last) >= Self.stallThreshold {
-                trackStalled.insert(name)
-                notifyUser(
-                    title: "Scribe: \(name) track stalled",
-                    body: "No \(name) audio has been written for \(Int(now.timeIntervalSince(last))) seconds."
-                )
-            }
+        guard Date().timeIntervalSince(startedAt) >= Self.signalWarningDelay else { return }
+        let health = captureHealth()
+        for name in health.missingTracks where warnedTracks.insert(name).inserted {
+            notifyUser(
+                title: "Scribe: no \(name) detected",
+                body: "Scribe is recording, but this track is digitally silent. Check the selected input and call audio before continuing."
+            )
         }
     }
 }

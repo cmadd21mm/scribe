@@ -1,9 +1,35 @@
 # Changelog
 
+## 0.2.14
+
+- Restored Quill's reliable global system-output capture after a supported call
+  is detected and the user explicitly chooses Record. This captures FaceTime's
+  `avconferenced` audio and browser/meeting-app helper processes while excluding
+  Scribe's own output.
+- Added signal-level health checks for both tracks, so valid AAC files filled
+  with digital silence can no longer be mistaken for successful recordings.
+- Added bidirectional microphone recovery: a silent raw route retries Apple's
+  voice-processing route, and a silent voice-processing route retries raw.
+- Warn during a recording when an expected track remains silent, explain
+  partial capture on stop, and do not enqueue transcription when neither track
+  contains a usable signal.
+
 ## 0.2.13
 
+- Fixed the AppKit launch boundary so the application run loop no longer
+  occupies Swift's MainActor executor. Recording, summary generation, Ask
+  Scribe, and their timeout tasks can now execute from UI actions.
+- Restored Quill's proven capture-triggered microphone consent path instead of
+  relying on a preflight that could report denial without presenting a prompt.
+- Start microphone capture before call-audio capture so its consent cannot be
+  masked by a separate system-audio permission failure.
 - Fixed release-build ownership so Scribe's main controller, window, recording
   actions, and AI actions stay alive for the entire running application.
+- Replaced optimizer-dependent lifetime hints with an explicit process-wide
+  owner, preventing a visible window from outliving its recording callbacks.
+- Made recording controls strongly retain their action controller, added
+  phase-specific startup status, and replaced indefinite microphone waits with
+  a 20-second recovery error that links to the correct privacy settings.
 - Fixed the macOS app lifecycle so clicking Scribe in the Dock or opening it
   again always restores the main window after it has been closed.
 - Added standard untitled-file reopen handling so Finder and Launch Services

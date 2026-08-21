@@ -3,7 +3,6 @@ import ArgumentParser
 import Foundation
 import SwiftUI
 
-@main
 struct ScribeCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "scribe",
@@ -131,7 +130,19 @@ struct DemoSnapshot: AsyncParsableCommand {
     }
 }
 
-struct Run: AsyncParsableCommand {
+/// A process-wide strong owner for the objects that make the GUI functional.
+/// AppKit retains windows, but neither `NSApplication.delegate` nor Scribe's
+/// UI callbacks retain `AppController`; without this owner an optimized build
+/// can leave a visible window whose actions point to a released controller.
+@MainActor
+private final class ScribeRuntime {
+    static let shared = ScribeRuntime()
+
+    var controller: AppController?
+    var signalSource: DispatchSourceSignal?
+}
+
+struct Run: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "run",
         abstract: "Run the menu-bar daemon (default)."
@@ -143,17 +154,19 @@ struct Run: AsyncParsableCommand {
     @Flag(name: .long, help: "Open the app with built-in sample meetings for screenshots and design review.")
     var demo = false
 
-    func run() async throws {
-        // The async root may dispatch synchronous subcommands on a cooperative
-        // executor. Explicitly hop to AppKit's main actor before starting the
-        // application run loop.
-        try await runMain()
+    func run() throws {
+        let root = Config.resolveRoot(cliOverride: out)
+        let demo = self.demo
+        // The custom synchronous process entry point invokes Run on the
+        // initial main thread, matching working Quill builds. NSApplication's
+        // run loop is therefore not nested inside a Swift MainActor task.
+        try MainActor.assumeIsolated {
+            try Self.runMain(root: root, demo: demo)
+        }
     }
 
     @MainActor
-    private func runMain() throws {
-        let root = Config.resolveRoot(cliOverride: out)
-
+    private static func runMain(root: URL, demo: Bool) throws {
         // Permissions are intentionally non-blocking. Scribe should always
         // open, explain what is missing, and ask only when the user records.
         let checks = DoctorReport.run(recordingsRoot: root)
@@ -165,7 +178,9 @@ struct Run: AsyncParsableCommand {
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
 
+        let runtime = ScribeRuntime.shared
         let controller = AppController(root: root, demo: demo)
+        runtime.controller = controller
 
         let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
         sigint.setEventHandler {
@@ -173,21 +188,33 @@ struct Run: AsyncParsableCommand {
             MainActor.assumeIsolated { controller.shutdown() }
         }
         sigint.resume()
+        runtime.signalSource = sigint
         signal(SIGINT, SIG_IGN)
+
+        // Enables a real-process lifecycle smoke test without exposing a user
+        // feature. The probe is deliberately a MainActor task: if the AppKit
+        // launch boundary regresses, it cannot run and the smoke test fails.
+        if let probePath = ProcessInfo.processInfo.environment["SCRIBE_RUNTIME_PROBE_PATH"] {
+            Task { @MainActor in
+                do {
+                    try Data("main-actor-ready\n".utf8).write(
+                        to: URL(fileURLWithPath: probePath),
+                        options: .atomic
+                    )
+                    FileHandle.standardError.write(Data("runtime probe passed\n".utf8))
+                } catch {
+                    FileHandle.standardError.write(Data("runtime probe failed: \(error)\n".utf8))
+                }
+                NSApp.terminate(nil)
+            }
+        }
 
         FileHandle.standardError.write(Data(
             "Scribe is open · recordings → \(root.path) · ^C to quit\n".utf8
         ))
-        // `NSApplication` does not retain our controller, and its delegate is
-        // weak. Keep both the application controller and signal source alive
-        // for the complete AppKit run loop; optimized release builds may
-        // otherwise destroy the window and its action handlers while leaving
-        // an apparently running, unresponsive process behind.
-        withExtendedLifetime(controller) {
-            withExtendedLifetime(sigint) {
-                app.run()
-            }
-        }
+        app.run()
+        runtime.signalSource = nil
+        runtime.controller = nil
     }
 }
 
@@ -237,26 +264,26 @@ final class AppController {
         mainMenu = ScribeMainMenu()
         updater = ScribeUpdater()
 
-        menuBar.onToggle = { [weak self] in self?.toggle() }
-        menuBar.onOpenApp = { [weak self] in self?.windowController.present() }
-        menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
-        menuBar.onSettings = { [weak self] in self?.openSettings() }
-        menuBar.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
-        menuBar.onQuit = { [weak self] in self?.shutdown() }
+        menuBar.onToggle = { self.toggle() }
+        menuBar.onOpenApp = { self.windowController.present() }
+        menuBar.onOpenFolder = { self.openFolder() }
+        menuBar.onSettings = { self.openSettings() }
+        menuBar.onCheckForUpdates = { self.updater.checkForUpdates() }
+        menuBar.onQuit = { self.shutdown() }
         menuBar.update(recording: false, elapsed: nil)
 
-        mainMenu.onToggleRecording = { [weak self] in self?.toggle() }
-        mainMenu.onOpenFolder = { [weak self] in self?.openFolder() }
-        mainMenu.onOpenSettings = { [weak self] in self?.openSettings() }
-        mainMenu.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
-        mainMenu.onQuit = { [weak self] in self?.shutdown() }
+        mainMenu.onToggleRecording = { self.toggle() }
+        mainMenu.onOpenFolder = { self.openFolder() }
+        mainMenu.onOpenSettings = { self.openSettings() }
+        mainMenu.onCheckForUpdates = { self.updater.checkForUpdates() }
+        mainMenu.onQuit = { self.shutdown() }
         mainMenu.install()
 
-        model.onToggleRecording = { [weak self] in self?.toggle() }
-        model.onChooseRecordingsFolder = { [weak self] in self?.chooseRecordingsFolder() }
-        model.onCheckForUpdates = { [weak self] in self?.updater.checkForUpdates() }
-        model.onDownloadTranscriptionModel = { [weak self] selected in
-            self?.downloadTranscriptionModel(selected)
+        model.onToggleRecording = { self.toggle() }
+        model.onChooseRecordingsFolder = { self.chooseRecordingsFolder() }
+        model.onCheckForUpdates = { self.updater.checkForUpdates() }
+        model.onDownloadTranscriptionModel = { selected in
+            self.downloadTranscriptionModel(selected)
         }
         NSApp.delegate = windowController
         windowController.present()
@@ -360,6 +387,7 @@ final class AppController {
         }
         isStarting = true
         model.isStartingRecording = true
+        model.recordingStartDetail = "Preparing the meeting name…"
         model.showHome()
         windowController.present()
         defer {
@@ -372,20 +400,30 @@ final class AppController {
             sourceBundleID: sourceBundleID
         )
         do {
-            guard await Permissions.requestMicrophone() else {
-                throw RecordingStartError.permission(Permissions.microphoneSettingsMessage)
-            }
+            model.recordingStartDetail = "Checking available storage…"
             try DiskSpaceChecker.requireSpace(
                 at: root,
                 minimumBytes: Config.minimumFreeDiskBytes()
             )
+            // Match Quill's proven permission path: actual AVAudioEngine input
+            // capture asks macOS for microphone access. A permission preflight
+            // can report denied without ever presenting or registering Scribe.
+            model.recordingStartDetail = "Starting microphone… macOS may ask for access."
             let newSession = try RecordingSession(root: root, context: context)
             try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())
             session = newSession
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
-            let presentation = RecordingFailureMapper.presentation(for: error)
+            let presentationError: Error
+            if error is MicRecorder.RecorderError, Permissions.microphoneIsDenied {
+                presentationError = RecordingStartError.permission(
+                    Permissions.microphoneSettingsMessage
+                )
+            } else {
+                presentationError = error
+            }
+            let presentation = RecordingFailureMapper.presentation(for: presentationError)
             model.alertMessage = presentation.message
             model.alertSettingsPane = presentation.settingsPane
             windowController.present()
@@ -460,7 +498,7 @@ final class AppController {
 
     private func stopSession() {
         guard let session else { return }
-        session.stop()
+        let health = session.stop()
         let elapsed = Self.format(Date().timeIntervalSince(session.startedAt))
         FileHandle.standardError.write(Data(
             "○ stopped · \(elapsed) · \(session.dir.path)\n".utf8
@@ -472,6 +510,21 @@ final class AppController {
         model.isRecording = false
         model.recordingElapsed = "0:00"
         model.refresh()
+
+        if !health.hasAnySignal {
+            let message = "Scribe didn’t detect speech on the microphone or call-audio track. The silent files were kept for troubleshooting, but there is nothing to transcribe."
+            model.alertMessage = message
+            windowController.present()
+            notifyUser(title: "Scribe: no speech captured", body: message)
+            return
+        }
+        if !health.missingTracks.isEmpty {
+            let missing = health.missingTracks.joined(separator: " and ")
+            let message = "Scribe captured the meeting, but detected no signal on the \(missing) track. It will transcribe the audio that was captured."
+            model.alertMessage = message
+            windowController.present()
+            notifyUser(title: "Scribe: partial audio captured", body: message)
+        }
 
         let dir = session.dir
         Task { [transcription] in await transcription.enqueue(dir) }

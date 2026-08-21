@@ -25,6 +25,18 @@ struct MeetingLibraryTests {
         #expect(didReachController)
         #expect(model.selectedMeetingID == nil)
         #expect(model.isStartingRecording)
+        #expect(model.recordingStartDetail == "Contacting the recording controller…")
+    }
+
+    @Test("A missing recording controller fails visibly instead of spinning forever")
+    @MainActor
+    func missingRecordingControllerFailsVisibly() {
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+
+        model.requestToggleRecording()
+
+        #expect(!model.isStartingRecording)
+        #expect(model.alertMessage?.contains("recording controller") == true)
     }
 
     @Test("Copied summaries preserve decisions, actions, and open questions")
