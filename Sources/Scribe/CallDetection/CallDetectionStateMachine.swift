@@ -34,12 +34,16 @@ struct CallDetectionStateMachine: Sendable {
         self.endAfter = endAfter
     }
 
-    /// Detect calls only when a configured process has simultaneous live
-    /// input and output. Detection can emit a prompt, but never starts audio.
+    /// Detect calls when a configured app is actively using the microphone.
+    /// Input and output may belong to different helper processes; the finder
+    /// normalizes those helpers to one canonical app bundle ID first.
     mutating func update(processes: [AudioProcessSnapshot], now: Date) -> [Action] {
-        let eligible = Dictionary(grouping: processes.filter {
-            $0.isRunningInput && $0.isRunningOutput && $0.bundleID != nil
-        }, by: { $0.bundleID! })
+        let grouped = Dictionary(grouping: processes.filter { $0.bundleID != nil }) {
+            $0.bundleID!
+        }
+        let eligible = grouped.filter { _, snapshots in
+            snapshots.contains { $0.isRunningInput }
+        }
         let calls = eligible.mapValues { snapshots in
             LiveCall(
                 bundleID: snapshots[0].bundleID!,
@@ -105,12 +109,25 @@ struct CallDetectionStateMachine: Sendable {
 enum LiveCallFinder {
     static func configuredCalls(
         in processes: [AudioProcessSnapshot],
-        allowedBundleIDs: Set<String>
+        allowedBundleIDs: Set<String>,
+        runningBundleIDs: Set<String> = []
     ) -> [AudioProcessSnapshot] {
-        processes.filter {
-            $0.isRunningInput
-                && $0.isRunningOutput
-                && $0.bundleID.map(allowedBundleIDs.contains) == true
+        processes.compactMap { process in
+            guard process.isRunningInput || process.isRunningOutput,
+                  let bundleID = ConferenceAppMatcher.canonicalBundleID(
+                    for: process.bundleID,
+                    allowedBundleIDs: allowedBundleIDs,
+                    runningBundleIDs: runningBundleIDs,
+                    allowSharedAliases: true
+                  )
+            else { return nil }
+            return AudioProcessSnapshot(
+                objectID: process.objectID,
+                pid: process.pid,
+                bundleID: bundleID,
+                isRunningInput: process.isRunningInput,
+                isRunningOutput: process.isRunningOutput
+            )
         }
     }
 }

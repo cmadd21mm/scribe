@@ -1,3 +1,4 @@
+import AppKit
 import CoreAudio
 import Foundation
 
@@ -12,21 +13,81 @@ struct AudioProcessSnapshot: Equatable, Sendable {
 }
 
 enum AudioProcessSelector {
-    /// Return only active output processes whose bundle IDs are explicitly
-    /// allowed. Scribe never falls back to a global tap.
+    /// Return active output processes that belong to a configured app. Helper
+    /// processes are normalized back to the parent app's bundle ID so browser
+    /// renderers and Electron audio services do not hide the meeting source.
     static func captureTargets(
         from processes: [AudioProcessSnapshot],
-        allowedBundleIDs: Set<String>
+        allowedBundleIDs: Set<String>,
+        runningBundleIDs: Set<String> = []
     ) -> [AudioProcessSnapshot] {
         processes
-            .filter { process in
-                process.isRunningOutput
-                    && process.bundleID.map(allowedBundleIDs.contains) == true
+            .compactMap { process in
+                guard process.isRunningOutput,
+                      let bundleID = ConferenceAppMatcher.canonicalBundleID(
+                        for: process.bundleID,
+                        allowedBundleIDs: allowedBundleIDs,
+                        runningBundleIDs: runningBundleIDs
+                      )
+                else { return nil }
+                return process.with(bundleID: bundleID)
             }
             .sorted { lhs, rhs in
                 if lhs.pid == rhs.pid { return lhs.objectID < rhs.objectID }
                 return lhs.pid < rhs.pid
             }
+    }
+}
+
+enum ConferenceAppMatcher {
+    /// Helpers normally retain the parent bundle ID as a prefix. Apple routes
+    /// Safari and FaceTime through shared services whose identifiers need an
+    /// explicit alias.
+    private static let helperAliases: [(prefix: String, parent: String)] = [
+        ("com.apple.WebKit", "com.apple.Safari"),
+        ("com.apple.avconferenced", "com.apple.FaceTime"),
+    ]
+
+    static func canonicalBundleID(
+        for processBundleID: String?,
+        allowedBundleIDs: Set<String>,
+        runningBundleIDs: Set<String> = [],
+        allowSharedAliases: Bool = false
+    ) -> String? {
+        guard let processBundleID, !processBundleID.isEmpty else { return nil }
+        if allowedBundleIDs.contains(processBundleID) { return processBundleID }
+
+        // Prefer the longest match if a user configured overlapping IDs.
+        if let parent = allowedBundleIDs
+            .sorted(by: { $0.count > $1.count })
+            .first(where: {
+                processBundleID.hasPrefix($0 + ".")
+                    || processBundleID.hasPrefix($0 + "-")
+            }) {
+            return parent
+        }
+
+        guard allowSharedAliases else { return nil }
+        for alias in helperAliases
+        where allowedBundleIDs.contains(alias.parent)
+            && runningBundleIDs.contains(alias.parent)
+            && (processBundleID == alias.prefix
+                || processBundleID.hasPrefix(alias.prefix + ".")) {
+            return alias.parent
+        }
+        return nil
+    }
+}
+
+private extension AudioProcessSnapshot {
+    func with(bundleID: String) -> AudioProcessSnapshot {
+        AudioProcessSnapshot(
+            objectID: objectID,
+            pid: pid,
+            bundleID: bundleID,
+            isRunningInput: isRunningInput,
+            isRunningOutput: isRunningOutput
+        )
     }
 }
 
@@ -69,6 +130,10 @@ enum AudioProcessDiscovery {
                 ).map { (value: UInt32) in value != 0 } ?? false
             )
         }
+    }
+
+    static func runningApplicationBundleIDs() -> Set<String> {
+        Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     }
 
     private static func processObjectIDs() throws -> [AudioObjectID] {

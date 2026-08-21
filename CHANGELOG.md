@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.15
+
+- Make an explicit Record action capture system output for every meeting,
+  including apps whose audio is routed through an unknown or shared helper.
+- Normalize Chromium, Electron, WebKit, and FaceTime helper processes back to
+  their parent app for reliable source labels and automatic call prompts.
+- Require Safari or FaceTime to be running before attributing Apple's shared
+  WebKit or conferencing service, preventing false source labels.
+- Detect configured calls when microphone input and speaker output are owned by
+  separate processes; output-only browser media still never triggers a prompt.
+- Classify an unrecognized recording as online when its system track contains a
+  signal, while keeping silent system tracks out of in-person warnings.
+- Mark sessions with no usable signal so retained troubleshooting files are not
+  repeatedly queued for transcription on every launch.
+- Remove long, near-identical overlaps from the microphone transcript when
+  speaker playback is already represented by the cleaner system track.
+- Clarify in Settings and the README that explicit recording captures system
+  output and can therefore include notification or media sounds.
+
 ## 0.2.14
 
 - Restored Quill's reliable global system-output capture after a supported call

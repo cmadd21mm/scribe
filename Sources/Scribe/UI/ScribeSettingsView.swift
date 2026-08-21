@@ -108,7 +108,7 @@ struct ScribeSettingsView: View {
                         )
                     }
 
-                    settingsSection("Call sources") {
+                    settingsSection("Automatic call prompts") {
                         ForEach(ScribeAppModel.captureSources) { source in
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: source.symbol)
