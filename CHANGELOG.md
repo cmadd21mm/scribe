@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.16
+
+- Guide first-time setup through speech-model downloads, audio checks, and
+  optional summaries, with clear results and a way to resume unfinished setup.
+- Test microphone and Mac audio with one click: read a sentence, then Scribe
+  plays a chime automatically. Headphones are supported.
+- Keep microphone signal detection active after startup and retain separate
+  audio-check results so users can see which track needs attention.
+- Add cancellable model downloads, transcription retries, and local AI setup
+  with connection testing. Required models are checked before recording.
+- Remember your speaker name and let you correct speaker labels for an entire
+  track or an individual moment, with consistent transcript exports.
+- Preserve meeting titles when renamed during transcription and prevent active
+  recordings or already-running transcription jobs from being queued again.
+- Clarify permission controls, optional AI configuration, and audio privacy
+  information throughout setup and settings.
+
 ## 0.2.15
 
 - Make an explicit Record action capture system output for every meeting,

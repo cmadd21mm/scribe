@@ -262,7 +262,7 @@ private struct MeetingSidebar: View {
                     Text("Saved on this Mac")
                         .font(ScribeTheme.sans(12, weight: .medium))
                         .foregroundStyle(ScribeTheme.ink)
-                    Text("Your notes never leave this device.")
+                    Text("Local by default. Sharing is your choice.")
                         .font(ScribeTheme.sans(10))
                         .foregroundStyle(ScribeTheme.faintInk)
                 }
@@ -782,6 +782,7 @@ private struct MeetingDetail: View {
                 Spacer()
                 if !meeting.transcript.isEmpty {
                     Button("Name speakers", systemImage: "person.wave.2") {
+                        model.speakerEditorLineID = nil
                         model.showSpeakerEditor = true
                     }
                     .buttonStyle(.plain)
@@ -792,12 +793,15 @@ private struct MeetingDetail: View {
                 }
             }
             if meeting.transcript.isEmpty {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("The local transcript will appear here when processing finishes.")
-                        .font(ScribeTheme.sans(13))
-                        .foregroundStyle(ScribeTheme.faintInk)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(meeting.state == "recording" ? "The transcript will be created after you stop recording." : model.transcriptionStatus ?? "Audio saved. Create a transcript when you’re ready.")
+                        .font(ScribeTheme.sans(13)).foregroundStyle(ScribeTheme.mutedInk)
+                    if meeting.state != "recording" && !meeting.isDemo {
+                        Button(model.transcriptionModel.isInstalled && model.transcriptionEnabled ? "Retry transcription" : "Set up transcription") {
+                            if model.transcriptionModel.isInstalled && model.transcriptionEnabled { model.onRetryTranscription?(meeting.directory) }
+                            else { model.openSetup(step: 1) }
+                        }.buttonStyle(ScribeSecondaryButtonStyle())
+                    }
                 }
             } else {
                 VStack(alignment: .leading, spacing: 9) {
@@ -816,10 +820,18 @@ private struct MeetingDetail: View {
                             Circle()
                                 .fill(speakerColor(line.speaker))
                                 .frame(width: 5, height: 5)
-                            Text(line.speaker)
-                                .font(ScribeTheme.sans(10, weight: .semibold))
+                            Button {
+                                model.speakerEditorLineID = line.id
+                                model.showSpeakerEditor = true
+                            } label: {
+                                Text(line.speaker).lineLimit(2)
+                            }
+                                .buttonStyle(.plain)
+                                .help("Name this speaker or correct this moment")
+                                .accessibilityLabel("Edit speaker \(line.speaker) at \(line.timestamp)")
+                                .font(ScribeTheme.sans(11, weight: .semibold))
                                 .foregroundStyle(ScribeTheme.mutedInk)
-                                .frame(width: 62, alignment: .leading)
+                                .frame(width: 90, alignment: .leading)
                             Text(line.text)
                         .font(ScribeTheme.sans(13))
                                 .foregroundStyle(ScribeTheme.ink)
@@ -913,6 +925,19 @@ private struct ScribeHome: View {
                         .lineSpacing(4)
                 }
 
+                if model.needsSetup {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: "checklist").foregroundStyle(ScribeTheme.coral)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Get ready for your first meeting").font(ScribeTheme.sans(14, weight: .semibold))
+                            Text("Check your audio, prepare transcription, and choose a speaker name.")
+                                .font(ScribeTheme.sans(12)).foregroundStyle(ScribeTheme.mutedInk)
+                        }
+                        Spacer()
+                        Button("Finish setup") { model.openSetup(step: model.setupStep) }
+                            .buttonStyle(ScribeSecondaryButtonStyle())
+                    }.padding(18).background(ScribeTheme.surface).clipShape(RoundedRectangle(cornerRadius: 10))
+                }
                 recordingCard
 
                 if !model.meetings.isEmpty {
@@ -969,7 +994,7 @@ private struct ScribeHome: View {
                 HStack(spacing: 10) {
                     Image(systemName: model.configuredSummaryAIName == nil ? "sparkles" : "checkmark.seal")
                         .foregroundStyle(ScribeTheme.coral)
-                    Text(model.configuredSummaryAIName.map { "Meeting analysis is connected to \($0)." }
+                    Text(model.configuredSummaryAIName.map { "Meeting analysis is configured with \($0)." }
                          ?? "Connect meeting AI to generate reliable summaries and action items.")
                         .font(ScribeTheme.sans(11))
                         .foregroundStyle(ScribeTheme.mutedInk)
@@ -1167,21 +1192,19 @@ struct MeetingRenameEditor: View {
     }
 }
 
-private struct MeetingSpeakerEditor: View {
+struct MeetingSpeakerEditor: View {
     @ObservedObject var model: ScribeAppModel
     let meeting: MeetingRecord
     @Environment(\.dismiss) private var dismiss
     @State private var names: [String: String]
     @State private var overrides: [Int: String]
+    @State private var rememberMyName = false
+    @State private var speakerSearch = ""
 
     init(model: ScribeAppModel, meeting: MeetingRecord) {
         self.model = model
         self.meeting = meeting
-        var initial = meeting.speakerNames
-        for line in meeting.transcript where initial[line.rawSpeaker] == nil {
-            initial[line.rawSpeaker] = line.speaker == "YOU" ? "Me" : line.speaker.capitalized
-        }
-        _names = State(initialValue: initial)
+        _names = State(initialValue: SpeakerIdentity.initialNames(for: meeting, profileName: model.speakerName))
         _overrides = State(initialValue: meeting.speakerOverrides)
     }
 
@@ -1191,7 +1214,7 @@ private struct MeetingSpeakerEditor: View {
                 Text("Name speakers")
                     .font(ScribeTheme.serif(28, weight: .semibold))
                     .foregroundStyle(ScribeTheme.ink)
-                Text("Names are saved only with this meeting and update the readable transcript.")
+                Text("Name each track or tag individual moments. Names update this meeting’s transcript and future AI context.")
                     .font(ScribeTheme.sans(12))
                     .foregroundStyle(ScribeTheme.mutedInk)
             }
@@ -1204,10 +1227,11 @@ private struct MeetingSpeakerEditor: View {
                             .foregroundStyle(speakerID == "me" ? ScribeTheme.coral : ScribeTheme.blue)
                             .frame(width: 28)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(speakerID == "me" ? "Microphone track" : "Call audio track")
+                            Text(speakerID == "me" ? "You · microphone track" : speakerID == "them" ? "Call audio · use one name only if one person is speaking" : "Speaker label")
                                 .font(ScribeTheme.sans(10))
                                 .foregroundStyle(ScribeTheme.faintInk)
                             TextField("Speaker name", text: binding(for: speakerID))
+                                .accessibilityLabel(speakerID == "me" ? "Your name for this meeting" : "Name for call audio track")
                                 .textFieldStyle(.roundedBorder)
                                 .font(ScribeTheme.sans(13))
                         }
@@ -1215,20 +1239,35 @@ private struct MeetingSpeakerEditor: View {
                 }
             }
 
-            if speakerIDs.contains("them") && !meeting.transcript.isEmpty {
+            if speakerIDs.contains("me") {
+                Toggle("Remember my name for new meetings", isOn: $rememberMyName)
+                    .font(ScribeTheme.sans(12))
+            }
+            if !suggestedNames.isEmpty {
+                Menu("Use a meeting attendee for the call track") {
+                    ForEach(suggestedNames, id: \.self) { person in
+                        Button(person) { names["them"] = person }
+                    }
+                }.disabled(!speakerIDs.contains("them"))
+            }
+            if !meeting.transcript.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("CORRECT INDIVIDUAL MOMENTS")
                         .font(ScribeTheme.sans(9, weight: .bold))
                         .tracking(1)
                         .foregroundStyle(ScribeTheme.coral)
-                    Text("If several people share the call track, type a name beside any moment that needs a correction.")
+                    Text("Call audio mixes everyone together; account names are not available from Mac audio. Listen to a moment and tag who spoke. Attendees are suggestions, not automatic matches.")
                         .font(ScribeTheme.sans(10))
                         .foregroundStyle(ScribeTheme.mutedInk)
+                    TextField("Find words or a timestamp", text: $speakerSearch).textFieldStyle(.roundedBorder)
+                    ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 8) {
-                            ForEach(meeting.transcript) { line in
+                            ForEach(filteredLines) { line in
                                 HStack(alignment: .center, spacing: 9) {
-                                    Text(line.timestamp)
+                                    Button(line.timestamp) { model.playSelectedMeeting(at: line.startMilliseconds) }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Listen at \(line.timestamp)")
                                         .font(.system(size: 9, design: .monospaced))
                                         .foregroundStyle(ScribeTheme.faintInk)
                                         .frame(width: 42, alignment: .leading)
@@ -1238,14 +1277,29 @@ private struct MeetingSpeakerEditor: View {
                                         .lineLimit(1)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                     TextField(names[line.rawSpeaker] ?? line.speaker, text: overrideBinding(for: line.id))
+                                        .accessibilityLabel("Speaker at \(line.timestamp)")
                                         .textFieldStyle(.roundedBorder)
                                         .font(ScribeTheme.sans(10))
                                         .frame(width: 125)
-                                }
+                                    if !suggestedNames.isEmpty {
+                                        Menu {
+                                            ForEach(suggestedNames, id: \.self) { person in
+                                                Button(person) { overrides[line.id] = person }
+                                            }
+                                            Button("Use track name") { overrides[line.id] = nil }
+                                        } label: { Image(systemName: "person.crop.circle.badge.checkmark") }
+                                        .menuStyle(.borderlessButton).frame(width: 24)
+                                        .accessibilityLabel("Choose speaker at \(line.timestamp)")
+                                    }
+                                }.id(line.id)
                             }
                         }
                     }
                     .frame(maxHeight: 220)
+                    .onAppear {
+                        if let id = model.speakerEditorLineID { proxy.scrollTo(id, anchor: .center) }
+                    }
+                    }
                 }
             }
 
@@ -1254,18 +1308,32 @@ private struct MeetingSpeakerEditor: View {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .scribePointer()
-                Button("Save names") { model.saveSpeakerDetails(names: names, overrides: overrides) }
+                Button("Save names") {
+                    if rememberMyName, let ownName = names["me"], ownName != "Me", ownName != "YOU" {
+                        guard model.saveSpeakerProfile(ownName) else { return }
+                    }
+                    model.saveSpeakerDetails(names: names, overrides: overrides)
+                }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
             }
         }
         .padding(26)
-        .frame(width: 650, height: speakerIDs.contains("them") ? 650 : 380)
+        .frame(width: 740, height: 730)
         .background(ScribeTheme.paper)
     }
 
+    private var suggestedNames: [String] {
+        SpeakerIdentity.suggestions(attendees: meeting.attendees + meeting.workspace.people, ownName: model.speakerName)
+    }
+
+    private var filteredLines: [MeetingTranscriptLine] {
+        let query = speakerSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? meeting.transcript : meeting.transcript.filter { $0.text.localizedCaseInsensitiveContains(query) || $0.timestamp.contains(query) }
+    }
+
     private var speakerIDs: [String] {
-        Array(Set(meeting.transcript.map(\.rawSpeaker))).sorted { lhs, _ in lhs == "me" }
+        Array(Set(meeting.transcript.map(\.rawSpeaker))).sorted { lhs, rhs in lhs == "me" ? rhs != "me" : rhs != "me" && lhs < rhs }
     }
 
     private func binding(for id: String) -> Binding<String> {

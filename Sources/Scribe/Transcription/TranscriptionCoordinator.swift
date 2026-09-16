@@ -16,9 +16,15 @@ actor TranscriptionCoordinator {
 
     private var queue: [URL] = []
     private var draining = false
+    private var activeDirectory: URL?
     private var engine: TranscriptionEngine?
     private var lastFailure: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
+    private let makeEngine: @Sendable () -> any TranscriptionEngine
+
+    init(makeEngine: @escaping @Sendable () -> any TranscriptionEngine = { ParakeetEngine() }) {
+        self.makeEngine = makeEngine
+    }
 
     func setStatusHandler(_ handler: @escaping @Sendable (Status) -> Void) {
         statusHandler = handler
@@ -29,6 +35,7 @@ actor TranscriptionCoordinator {
             try await transcribe(sessionDir)
             await releaseEngine()
         } catch {
+            log(sessionDir, "transcription failed: \(error)")
             await releaseEngine()
             throw error
         }
@@ -43,6 +50,7 @@ actor TranscriptionCoordinator {
     /// and metadata remain available and no post-processing process is run.
     func enqueue(_ sessionDir: URL) {
         guard Config.transcriptionEnabled() else { return }
+        guard activeDirectory != sessionDir, !queue.contains(sessionDir) else { return }
         queue.append(sessionDir)
         drainIfIdle()
     }
@@ -63,7 +71,7 @@ actor TranscriptionCoordinator {
                     && !fm.fileExists(atPath: $0.appendingPathComponent("transcript.json").path)
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        for dir in pending where !queue.contains(dir) {
+        for dir in pending where !queue.contains(dir) && activeDirectory != dir {
             queue.append(dir)
         }
         if !pending.isEmpty {
@@ -88,6 +96,9 @@ actor TranscriptionCoordinator {
               let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return false }
 
+        // Downloads can finish while an audio-only meeting is still live.
+        // Never resume a folder whose writer has not stopped.
+        if metadata["state"] as? String == "recording" { return false }
         if metadata["has_usable_audio"] as? Bool == false { return false }
         let warnings = Set(metadata["capture_warnings"] as? [String] ?? [])
         if warnings.contains("microphone") && warnings.contains("call audio") {
@@ -112,6 +123,7 @@ actor TranscriptionCoordinator {
     private func drain() async {
         while !queue.isEmpty {
             let dir = queue.removeFirst()
+            activeDirectory = dir
             publish(.transcribing(session: dir.lastPathComponent, queued: queue.count))
             do {
                 try await transcribe(dir)
@@ -125,6 +137,7 @@ actor TranscriptionCoordinator {
                 )
             }
         }
+        activeDirectory = nil
         await engine?.release()
         engine = nil
         publish(lastFailure.map { .failed(session: $0) } ?? .idle)
@@ -135,6 +148,7 @@ actor TranscriptionCoordinator {
     }
 
     private func transcribe(_ dir: URL) async throws {
+        log(dir, "starting transcription — loading local model")
         let meta = try SessionMeta.read(from: dir)
         let engine = try await preparedEngine()
 
@@ -192,7 +206,7 @@ actor TranscriptionCoordinator {
                 "warning: unknown transcription engine \"\(configured)\" — using parakeet\n".utf8
             ))
         }
-        let engine = ParakeetEngine()
+        let engine = makeEngine()
         try await engine.prepare()
         self.engine = engine
         return engine
@@ -319,7 +333,16 @@ struct Transcript: Codable {
     }
 
     func writeMarkdown(to dir: URL) throws {
-        let markdown = Data(rendered(title: dir.lastPathComponent).utf8)
+        // Pending meetings can be renamed without moving their audio folder.
+        // Read the current display title after recognition has finished.
+        let metadata = (try? Data(contentsOf: dir.appendingPathComponent("meta.json")))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let title = metadata?["title"] as? String ?? dir.lastPathComponent
+        let names = (try? Data(contentsOf: dir.appendingPathComponent("speaker-names.json")))
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        let overrides = (try? Data(contentsOf: dir.appendingPathComponent("speaker-overrides.json")))
+            .flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+        let markdown = Data(rendered(title: title, names: names, overrides: overrides).utf8)
         try markdown.write(
             to: dir.appendingPathComponent("transcript.md"),
             options: .atomic
@@ -334,10 +357,11 @@ struct Transcript: Codable {
             .write(to: dir.appendingPathComponent("transcript.json"), options: .atomic)
     }
 
-    private func rendered(title: String) -> String {
+    private func rendered(title: String, names: [String: String], overrides: [String: String]) -> String {
         var lines = ["# \(title)", "", "engine: \(engine) (\(model))", ""]
-        for seg in segments {
-            lines.append("**[\(Self.clock(seg.start_ms))] \(seg.speaker):** \(seg.text)")
+        for (index, seg) in segments.enumerated() {
+            let name = overrides[String(index)] ?? names[seg.speaker] ?? seg.speaker
+            lines.append("**[\(Self.clock(seg.start_ms))] \(name):** \(seg.text)")
             lines.append("")
         }
         return lines.joined(separator: "\n")

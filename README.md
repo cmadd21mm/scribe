@@ -95,6 +95,32 @@ sh scripts/package-dmg.sh
 For a signed build, set `APPLE_SIGNING_IDENTITY`. To notarize the DMG, also set
 `APPLE_NOTARY_PROFILE` to a configured `notarytool` keychain profile.
 
+## First-run setup and speaker names
+
+The setup guide prepares transcription, walks through a temporary 15-second
+microphone and Mac-audio test, and offers optional summary configuration.
+Downloads can be cancelled and retried. Choose audio-only mode if you want to
+record before preparing transcription. **Finish setup** on Home resumes
+unfinished setup; **Settings → Review setup and test audio…** reopens it.
+
+Enter your name during setup or in Settings to label your microphone track in
+new recordings. In a meeting, click any speaker label or **Name speakers** to
+name the call track, listen to individual moments, and tag who spoke. Calendar
+attendees and saved meeting people appear as suggestions you confirm. Speaker
+names are preserved in readable transcripts and future AI context.
+
+Scribe does not receive Zoom or Teams account identities from Mac audio and
+does not automatically separate multiple voices on the call track. Use a
+single name for that track only for a one-person remote conversation; use
+individual tags when several people are speaking.
+
+For local summaries, choose **On-device Scribe → Use an installed local summary
+model**, then select a `llama.cpp` executable and a compatible GGUF model.
+**Test connection** uses synthetic text, never an existing meeting. You can
+also choose a remote provider with your own API key or continue with
+transcripts only. Configuration and a successful connection test are distinct;
+model quality still depends on the model you choose.
+
 ## Local transcription and summaries
 
 Transcription uses FluidAudio's local Parakeet models. Settings offers English

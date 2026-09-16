@@ -440,7 +440,8 @@ enum ScribeRemoteAIClient {
         prompt: String,
         settings: ScribeAISettings,
         maxTokens: Int,
-        structuredMeetingNote: Bool = false
+        structuredMeetingNote: Bool = false,
+        apiKeyOverride: String? = nil
     ) async throws -> String {
         guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw ScribeAIError.missingModel
@@ -448,9 +449,13 @@ enum ScribeRemoteAIClient {
         // Keychain can present an authorization dialog after installation or
         // signing changes. Read it off the main actor so that dialog can never
         // make Scribe's window look frozen while a request is starting.
-        let key = await Task.detached(priority: .userInitiated) {
-            ScribeKeychain.apiKey(provider: settings.provider)
-        }.value
+        let key: String
+        if let apiKeyOverride { key = apiKeyOverride }
+        else {
+            key = await Task.detached(priority: .userInitiated) {
+                ScribeKeychain.apiKey(provider: settings.provider)
+            }.value
+        }
         if settings.provider.needsAPIKey && key.isEmpty { throw ScribeAIError.missingAPIKey }
         let base = settings.baseURL.isEmpty ? settings.provider.defaultBaseURL : settings.baseURL
         let suffix = settings.provider == .claude ? "/messages" : "/chat/completions"
