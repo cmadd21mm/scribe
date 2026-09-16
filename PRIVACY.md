@@ -23,3 +23,10 @@ account, an upload, or a data trail.
 
 Because meeting audio can include other people, users are responsible for
 following the recording-consent laws and expectations that apply to them.
+
+## Scribe website
+
+The website at `scribe.computer` uses Vercel Web Analytics to count aggregate
+visitors, page views, and Download-button clicks. It does not use analytics
+cookies. Website analytics does not collect Scribe's meeting audio, transcripts,
+notes, or app usage.
