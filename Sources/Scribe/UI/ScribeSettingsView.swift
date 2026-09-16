@@ -5,6 +5,8 @@ import SwiftUI
 struct ScribeSettingsView: View {
     @ObservedObject var model: ScribeAppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var profileName = Config.speakerName()
+    @State private var permissionRefresh = 0
     @State private var calendarAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
 
     var body: some View {
@@ -29,6 +31,21 @@ struct ScribeSettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
+                    settingsSection("Setup and your name") {
+                        HStack {
+                            TextField("Your speaker name", text: $profileName)
+                                .textFieldStyle(.roundedBorder)
+                                .accessibilityLabel("Your name for new recordings")
+                            Button("Save name") { _ = model.saveSpeakerProfile(profileName) }
+                        }
+                        Text("Your name labels the microphone track in new meetings. Name other speakers from the transcript.")
+                            .font(ScribeTheme.sans(12)).foregroundStyle(ScribeTheme.mutedInk)
+                        Button("Review setup and test audio…") {
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { model.openSetup() }
+                        }.buttonStyle(ScribeSecondaryButtonStyle())
+                    }
+
                     settingsSection("General") {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "circle.lefthalf.filled")
@@ -124,7 +141,7 @@ struct ScribeSettingsView: View {
                                         .foregroundStyle(ScribeTheme.faintInk)
                                 }
                                 Spacer()
-                                Toggle("", isOn: Binding(
+                                Toggle(source.name, isOn: Binding(
                                     get: { model.isSourceEnabled(source) },
                                     set: { model.setSource(source, enabled: $0) }
                                 ))
@@ -173,7 +190,7 @@ struct ScribeSettingsView: View {
                                     .font(ScribeTheme.sans(13, weight: .medium))
                                     .foregroundStyle(ScribeTheme.ink)
                                 Text(model.configuredSummaryAIName.map {
-                                    "Connected to \($0). Summaries are generated only when you explicitly request them."
+                                    "Configured: \($0). Summaries are generated only when you explicitly request them."
                                 } ?? "Transcription works locally on its own. Connect a separate AI or capable local model before Scribe offers summaries, decisions, or action items.")
                                     .font(ScribeTheme.sans(10))
                                     .foregroundStyle(ScribeTheme.faintInk)
@@ -212,28 +229,6 @@ struct ScribeSettingsView: View {
                         }
                     }
 
-                    settingsSection("Meeting intelligence") {
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: "sparkles")
-                                .foregroundStyle(ScribeTheme.ink)
-                                .frame(width: 28, height: 24)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Meeting AI")
-                                    .font(ScribeTheme.sans(13, weight: .medium))
-                                    .foregroundStyle(ScribeTheme.ink)
-                                Text(model.aiSettings.provider == .local
-                                     ? "Connect a model for reliable summaries. Transcript search remains available locally."
-                                     : "Connected to \(model.aiSettings.provider.title). Context is shared only when you request a summary or ask a question.")
-                                    .font(ScribeTheme.sans(10))
-                                    .foregroundStyle(ScribeTheme.faintInk)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer()
-                            Button("Configure…") { model.showAISettings = true }
-                                .buttonStyle(ScribeSecondaryButtonStyle())
-                        }
-                    }
-
                     settingsSection("Storage") {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "folder")
@@ -267,7 +262,7 @@ struct ScribeSettingsView: View {
                             title: "Screen & System Audio",
                             detail: "Captures call audio and other sounds playing on this Mac while you record.",
                             pane: "Privacy_ScreenCapture",
-                            status: .init(text: "Checked when you record", symbol: "waveform.badge.magnifyingglass", needsAction: false)
+                            status: .init(text: model.audioSetup.verified ? "Audio test passed · recheck after device or permission changes" : "Audio test needed", symbol: "waveform.badge.magnifyingglass", needsAction: !model.audioSetup.verified)
                         )
                         permissionRow(
                             title: "Calendars",
@@ -292,6 +287,10 @@ struct ScribeSettingsView: View {
                 }
                 .padding(26)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            calendarAuthorizationStatus = EKEventStore.authorizationStatus(for: .event)
+            permissionRefresh += 1
         }
         .frame(width: 680, height: 760)
         .background(ScribeTheme.paper)
@@ -338,7 +337,7 @@ struct ScribeSettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Toggle("", isOn: isOn)
+            Toggle(title, isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .tint(ScribeTheme.coral)
@@ -353,6 +352,7 @@ struct ScribeSettingsView: View {
     }
 
     private var microphonePermission: PermissionDisplay {
+        let _ = permissionRefresh
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized:
             return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
@@ -367,7 +367,7 @@ struct ScribeSettingsView: View {
 
     private var microphonePermissionButtonTitle: String {
         AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
-            ? "Record to allow…"
+            ? "Set up audio…"
             : "Open Settings"
     }
 
@@ -378,19 +378,19 @@ struct ScribeSettingsView: View {
         return {
             dismiss()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                model.requestToggleRecording()
+                model.openSetup(step: 2)
             }
         }
     }
 
     private var calendarPermission: PermissionDisplay {
         switch calendarAuthorizationStatus {
-        case .authorized, .fullAccess, .writeOnly:
+        case .authorized, .fullAccess:
             return .init(text: "Allowed", symbol: "checkmark.shield", needsAction: false)
         case .notDetermined:
             return .init(text: "Optional", symbol: "calendar.badge.plus", needsAction: false)
-        case .denied, .restricted:
-            return .init(text: "Not allowed · optional", symbol: "calendar.badge.exclamationmark", needsAction: false)
+        case .denied, .restricted, .writeOnly:
+            return .init(text: "Read access needed · optional", symbol: "calendar.badge.exclamationmark", needsAction: false)
         @unknown default:
             return .init(text: "Check access", symbol: "questionmark.shield", needsAction: false)
         }
@@ -440,7 +440,7 @@ struct ScribeSettingsView: View {
                 .accessibilityLabel(
                     action == nil
                         ? "Open macOS settings for \(title)"
-                        : "Allow Scribe to access \(title)"
+                        : (title == "Microphone" ? "Open audio setup and test microphone" : "Allow Scribe to access \(title)")
                 )
         }
     }
@@ -478,6 +478,10 @@ struct ScribeModelManagerView: View {
             ScribeSectionDivider()
 
             VStack(spacing: 12) {
+                if model.downloadingModelID != nil { ModelDownloadStatus(model: model) }
+                if let error = model.modelDownloadError {
+                    Text(error).font(ScribeTheme.sans(12)).foregroundStyle(ScribeTheme.coral)
+                }
                 ForEach(LocalTranscriptionModel.allCases) { item in
                     modelCard(item)
                 }
@@ -496,7 +500,7 @@ struct ScribeModelManagerView: View {
             }
             .padding(24)
         }
-        .frame(width: 610, height: 490)
+        .frame(width: 610, height: model.modelDownloadError != nil || model.downloadingModelID != nil ? 620 : 490)
         .background(ScribeTheme.paper)
     }
 
@@ -573,6 +577,12 @@ struct ScribeAISettingsView: View {
     @State private var modelLoadTask: Task<Void, Never>?
     @State private var keySaveMessage: String?
     @State private var isLoadingStoredKey = false
+    @State private var localExecutable = Config.summarizationSettings()?.executable ?? ""
+    @State private var localModelPath = Config.summarizationSettings()?.modelPath ?? ""
+    @State private var connectLocalModel = Config.summarizationSettings() != nil
+    @State private var connectionMessage: String?
+    @State private var testingConnection = false
+    @State private var connectionTask: Task<Void, Never>?
 
     init(
         model: ScribeAppModel,
@@ -644,13 +654,16 @@ struct ScribeAISettingsView: View {
                 }
 
                 if provider == .local {
-                    Label(
-                        "Scribe can search local transcripts without a model, but it will not label that search as a summary. Connect a capable local or remote model for meeting analysis.",
-                        systemImage: "internaldrive"
-                    )
-                    .font(ScribeTheme.sans(11))
-                    .foregroundStyle(ScribeTheme.mutedInk)
-                    .fixedSize(horizontal: false, vertical: true)
+                    Toggle("Use an installed local summary model", isOn: $connectLocalModel)
+                    if connectLocalModel {
+                        Text("Choose a llama.cpp executable and a compatible GGUF model already on this Mac. These files are separate from the speech model.")
+                            .font(ScribeTheme.sans(12)).foregroundStyle(ScribeTheme.mutedInk)
+                        localFileRow("llama.cpp executable", value: $localExecutable)
+                        localFileRow("GGUF summary model", value: $localModelPath)
+                    } else {
+                        Text("Transcripts only. Local transcript search works without an AI connection; summaries and action items stay off.")
+                            .font(ScribeTheme.sans(13)).foregroundStyle(ScribeTheme.mutedInk)
+                    }
                 } else {
                     VStack(alignment: .leading, spacing: 7) {
                         fieldLabel(provider.needsAPIKey ? "API key" : "API key (optional)")
@@ -721,11 +734,28 @@ struct ScribeAISettingsView: View {
                 }
 
                 HStack {
-                    Text(provider == .local ? "No setup required." : "You stay in control of each request.")
+                    if testingConnection {
+                        ProgressView().controlSize(.small)
+                    } else if provider != .local || connectLocalModel {
+                        Button("Test connection") { testConnection() }
+                            .buttonStyle(ScribeSecondaryButtonStyle())
+                    }
+                    Text(provider == .local ? "Runs on your Mac." : "Tests send sample text only.")
                         .font(ScribeTheme.sans(10))
                         .foregroundStyle(ScribeTheme.faintInk)
                     Spacer()
                     Button("Save") {
+                        if provider == .local && !saveLocalConfiguration() { return }
+                        if provider != .local {
+                            if modelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                connectionMessage = "Choose a model before saving."
+                                return
+                            }
+                            if provider.needsAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                connectionMessage = "Add an API key before saving."
+                                return
+                            }
+                        }
                         let saved = model.saveAISettings(
                             ScribeAISettings(
                                 provider: provider,
@@ -735,21 +765,87 @@ struct ScribeAISettingsView: View {
                             ),
                             apiKey: apiKey
                         )
-                        if saved { onClose?() }
+                        if saved { close() }
+                        else { connectionMessage = model.alertMessage; model.alertMessage = nil }
                     }
                     .buttonStyle(ScribePrimaryButtonStyle())
                     .keyboardShortcut(.defaultAction)
+                    .disabled(testingConnection)
                     .accessibilityHint("Saves the provider, model, privacy option, and API key")
+                }
+                if let connectionMessage {
+                    Text(connectionMessage).font(ScribeTheme.sans(12)).foregroundStyle(ScribeTheme.mutedInk)
                 }
             }
             .padding(24)
+            .disabled(testingConnection)
         }
-        .frame(width: 640, height: provider == .local ? 390 : 690)
+        .onChange(of: provider) { _, _ in connectionMessage = nil }
+        .onChange(of: modelName) { _, _ in connectionMessage = nil }
+        .onChange(of: apiKey) { _, _ in connectionMessage = nil }
+        .onChange(of: baseURL) { _, _ in connectionMessage = nil }
+        .onChange(of: localExecutable) { _, _ in connectionMessage = nil }
+        .onChange(of: localModelPath) { _, _ in connectionMessage = nil }
+        .frame(width: 640, height: provider == .local ? 570 : 760)
         .background(ScribeTheme.paper)
         .onAppear {
             if loadsStoredKey { loadStoredKey(for: provider) }
         }
-        .onDisappear { cancelModelLoad() }
+        .onDisappear { cancelModelLoad(); connectionTask?.cancel() }
+    }
+
+    private func localFileRow(_ title: String, value: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(ScribeTheme.sans(12, weight: .semibold))
+            HStack {
+                TextField(title, text: value).textFieldStyle(.roundedBorder)
+                Button("Choose…") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = false
+                    panel.allowsMultipleSelection = false
+                    if panel.runModal() == .OK, let url = panel.url { value.wrappedValue = url.path }
+                }.accessibilityLabel("Choose \(title)")
+            }
+        }
+    }
+
+    private func localSummaryConfiguration() throws -> ScribeConfiguration.Summarization? {
+        guard connectLocalModel else { return nil }
+        return try LocalSummarySetup.configuration(executable: localExecutable, model: localModelPath)
+    }
+
+    private func saveLocalConfiguration() -> Bool {
+        do {
+            let summary = try localSummaryConfiguration()
+            try Config.update { $0.summarization = summary }
+            return true
+        } catch {
+            connectionMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    private func testConnection() {
+        let settings = ScribeAISettings(provider: provider, model: modelName, baseURL: baseURL, redactSensitive: redactSensitive)
+        let key = apiKey
+        let executable = localExecutable
+        let path = localModelPath
+        connectionMessage = nil
+        testingConnection = true
+        connectionTask = Task {
+            do {
+                if settings.provider == .local {
+                    let config = try LocalSummarySetup.configuration(executable: executable, model: path)
+                    let summarizer = LlamaCppSummarizer(executable: URL(fileURLWithPath: config.executable!), model: URL(fileURLWithPath: config.modelPath!), predictionTokens: 300)
+                    _ = try await summarizer.summarize(SummarizationRequest(title: "Connection test", attendees: ["Alex"], transcriptMarkdown: "Alex: We agreed to meet on Friday. I will send the agenda.", userNotes: "", style: .concise))
+                } else {
+                    _ = try await ScribeRemoteAIClient.complete(prompt: "Connection test. Reply with the word ready.", settings: settings, maxTokens: 32, apiKeyOverride: key)
+                }
+                guard !Task.isCancelled else { return }
+                connectionMessage = "Test passed. Save to use this configuration. No meeting content was sent."
+            } catch { connectionMessage = "Test failed: \(error.localizedDescription)" }
+            testingConnection = false
+        }
     }
 
     @ViewBuilder
@@ -980,80 +1076,5 @@ struct ScribeAISettingsView: View {
             .font(ScribeTheme.sans(9, weight: .bold))
             .tracking(1)
             .foregroundStyle(ScribeTheme.coral)
-    }
-}
-
-struct ScribeOnboardingView: View {
-    @ObservedObject var model: ScribeAppModel
-
-    var body: some View {
-        VStack(spacing: 24) {
-            ScribeBrand()
-            Text("Be present. Keep the useful parts.")
-                .font(ScribeTheme.serif(34, weight: .semibold))
-                .foregroundStyle(ScribeTheme.ink)
-                .multilineTextAlignment(.center)
-            Text("Scribe captures both sides of a conversation only when you choose Record, then turns it into searchable notes on your Mac.")
-                .font(ScribeTheme.sans(14))
-                .foregroundStyle(ScribeTheme.mutedInk)
-                .multilineTextAlignment(.center)
-                .lineSpacing(4)
-                .frame(maxWidth: 520)
-
-            HStack(alignment: .top, spacing: 14) {
-                onboardingCard(
-                    symbol: "hand.raised",
-                    title: "You decide",
-                    detail: "Scribe can offer to record a call. It never records automatically."
-                )
-                onboardingCard(
-                    symbol: "waveform.and.mic",
-                    title: "Both sides",
-                    detail: "Separate microphone and call-app tracks keep conversations clear."
-                )
-                onboardingCard(
-                    symbol: "internaldrive",
-                    title: "Local first",
-                    detail: "Audio, transcripts, and Markdown notes stay in a folder you own."
-                )
-            }
-
-            VStack(spacing: 10) {
-                Button("Start using Scribe") {
-                    model.completeOnboarding()
-                }
-                .buttonStyle(ScribePrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                Text("macOS will ask for microphone and system-audio access when you make your first recording.")
-                    .font(ScribeTheme.sans(10))
-                    .foregroundStyle(ScribeTheme.faintInk)
-            }
-        }
-        .padding(38)
-        .frame(width: 760, height: 570)
-        .background(ScribeTheme.paper)
-    }
-
-    private func onboardingCard(symbol: String, title: String, detail: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol)
-                .font(.system(size: 23, weight: .regular))
-                .foregroundStyle(ScribeTheme.coral)
-            Text(title)
-                .font(ScribeTheme.serif(17, weight: .semibold))
-                .foregroundStyle(ScribeTheme.ink)
-            Text(detail)
-                .font(ScribeTheme.sans(11))
-                .foregroundStyle(ScribeTheme.mutedInk)
-                .lineSpacing(3)
-        }
-        .frame(maxWidth: .infinity, minHeight: 125, alignment: .topLeading)
-        .padding(16)
-        .background(ScribeTheme.surface.opacity(0.70))
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .stroke(ScribeTheme.divider, lineWidth: 1)
-        )
     }
 }

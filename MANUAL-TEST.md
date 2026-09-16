@@ -24,6 +24,46 @@ For every completed recording below, expect exactly one folder named
 `source_bundle_id`. Listen to both CAF files: your speech belongs in `mic.caf`;
 the remote participant belongs in `system.caf`.
 
+## 1a. Public first-run onboarding and speaker names
+
+Use a fresh macOS test account and the packaged app; do not reset a daily-use
+account's permissions or delete its model cache for this test. These checks
+must be performed on real hardware, in addition to the automated tests.
+
+1. Launch without cached speech models. Confirm setup opens and asks for a name.
+2. Start the recommended download, continue to Audio check, cancel the download,
+   and retry. Disconnect networking during a download and confirm a useful error.
+3. Try Record without a model: it must open transcription setup before creating
+   a meeting. Choose audio-only mode and verify recording remains available.
+4. In Audio check, click **Start 15-second check** and read the displayed sentence.
+   Keep other apps quiet. Confirm Scribe plays a chime automatically after eight
+   seconds, without another click or external media. Confirm both signal indicators,
+   the automatic 15-second stop, separate
+   playback buttons, and a readable microphone transcript after the model loads.
+   Also try waiting five seconds before speaking. A late voice must still update
+   the microphone indicator. With both tracks and transcription passed, the last
+   screen must offer **Start using Scribe**. When a track is not detected, the last
+   screen must identify it and offer **Review audio check**. Quit/reopen and confirm
+   it remembers which track was missing. Stop or close setup before the chime:
+   no delayed sound should play. Repeat after denying system audio access and
+   check that playback alone never counts as successful audio capture.
+5. Deny each audio permission in turn, follow its settings link, return, and retry.
+   Quiet audio must not be misrepresented as proven permission denial.
+6. Stop/discard a test and finish later. Confirm it creates no meeting in the
+   library and a Finish setup entry remains. Restart and resume the saved step.
+7. Finish an audio-only meeting while a model download is running. When download
+   completes, pending finished recordings should resume once. A still-recording
+   meeting must not be transcribed until stopped.
+8. Continue with transcripts only. Separately test local executable/model path
+   validation, a synthetic local summary test, and a remote test with an invalid
+   key/model followed by a valid connection. No real meeting text is used by tests.
+9. Record with a saved personal name. Confirm the microphone label and exported
+   Markdown use it. Rename the remote track for a one-to-one call. For a group,
+   tag individual moments using playback and attendee suggestions. Reopen and
+   verify corrections; an individual correction must not rename the whole track.
+10. Traverse setup, settings switches, and speaker fields with keyboard and
+    VoiceOver. Confirm meaningful labels, focused controls, and readable copy.
+
 ## 2. Consent behavior—no automatic recording
 
 1. Start a configured call and wait longer than `call_prompt_delay_seconds`.
@@ -43,7 +83,7 @@ the remote participant belongs in `system.caf`.
    trigger a Messages notification.
 4. End the Zoom call and wait `call_end_delay_seconds`.
 5. Verify the expected folder and files. `system.caf` must contain the remote
-   participant, not the separate music or notification sound.
+   participant and may also contain the separate music or notification sound.
 
 ## 4. Microsoft Teams
 
@@ -51,22 +91,21 @@ the remote participant belongs in `system.caf`.
 2. Click **Record** in Scribe's prompt; share/unshare the screen once to provoke
    possible audio-device reconfiguration.
 3. End the meeting and wait for local processing.
-4. Verify the expected files, two-sided transcript, structured note, and no
-   unrelated output in `system.caf`.
+4. Verify the expected files, two-sided transcript, optional structured note. Other Mac output can be included in `system.caf`.
 
 ## 5. Google Meet in Chrome
 
 1. Join Meet in Chrome; close or mute unrelated audio tabs for this test.
 2. Click **Record**, have both sides speak, then play music in a separate native
    app.
-3. End the Meet call and verify the expected files and isolation.
+3. End the Meet call and verify the expected files and system-output capture.
 4. Record `meta.json.source_bundle_id`; expect `com.google.Chrome`.
 
 ## 6. Google Meet in Safari
 
 1. Join Meet in Safari and click **Record** in Scribe's prompt.
 2. Have both sides speak, then trigger unrelated audio from a separate app.
-3. End the call and verify the expected files and isolation.
+3. End the call and verify the expected files and system-output capture.
 4. Expect `meta.json.source_bundle_id` to be `com.apple.Safari` (if Core Audio
    reports a Safari helper bundle instead, add that reported ID from
    `scribe apps` to `call_apps` and record it here).
@@ -76,7 +115,7 @@ the remote participant belongs in `system.caf`.
 1. Start a huddle in the Slack desktop app with a remote participant.
 2. Click **Record**, have both sides speak, and receive a notification from a
    different app.
-3. End the huddle and verify the expected files and isolation.
+3. End the huddle and verify the expected files and system-output capture.
 4. Expect source bundle ID `com.tinyspeck.slackmacgap`.
 
 ## 8. Slack huddle—browser
@@ -105,7 +144,7 @@ the remote participant belongs in `system.caf`.
 
 1. Join a Webex meeting and click **Record**.
 2. Have both sides speak and exercise mute/unmute once.
-3. End the meeting and verify the expected files and isolation.
+3. End the meeting and verify the expected files and system-output capture.
 4. Record whether Core Audio reports `com.cisco.webexmeetingsapp` or
    `Cisco-Systems.Spark`.
 

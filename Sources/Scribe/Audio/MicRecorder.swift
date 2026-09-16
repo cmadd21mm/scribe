@@ -45,9 +45,7 @@ final class MicRecorder: @unchecked Sendable {
         var file: AVAudioFile?
         var firstBufferAt: Date?
         var lastBufferAt: Date?
-        var livenessFrames = 0
-        var livenessPeak: Float = 0
-        var livenessSettled = false
+        var signalCheck = MicrophoneSignalCheck()
         var silenceRecoveryAttempted = false
         var unrecoverableSilence = false
     }
@@ -71,7 +69,7 @@ final class MicRecorder: @unchecked Sendable {
 
     var signalStatus: AudioSignalStatus {
         state.withLock {
-            AudioSignalStatus(capturedFrames: Int64($0.livenessFrames), peak: $0.livenessPeak)
+            $0.signalCheck.status
         }
     }
 
@@ -83,9 +81,7 @@ final class MicRecorder: @unchecked Sendable {
         state.withLock {
             $0.firstBufferAt = nil
             $0.lastBufferAt = nil
-            $0.livenessFrames = 0
-            $0.livenessPeak = 0
-            $0.livenessSettled = false
+            $0.signalCheck = MicrophoneSignalCheck()
             $0.silenceRecoveryAttempted = false
             $0.unrecoverableSilence = false
         }
@@ -128,9 +124,7 @@ final class MicRecorder: @unchecked Sendable {
 
         var voice = voiceProcessing
         state.withLock {
-            $0.livenessFrames = 0
-            $0.livenessPeak = 0
-            $0.livenessSettled = false
+            $0.signalCheck = MicrophoneSignalCheck()
         }
 
         if voice {
@@ -325,12 +319,7 @@ final class MicRecorder: @unchecked Sendable {
     ) -> LivenessAction {
         let peak = AudioSignalStatus.peak(in: buffer)
         return state.withLock { state in
-            guard !state.livenessSettled else { return .none }
-            state.livenessFrames += Int(buffer.frameLength)
-            state.livenessPeak = max(state.livenessPeak, peak)
-            guard state.livenessFrames >= Int(sampleRate * 2) else { return .none }
-            state.livenessSettled = true
-            guard state.livenessPeak <= 0.000_001 else { return .none }
+            guard state.signalCheck.observe(frameCount: Int(buffer.frameLength), peak: peak, sampleRate: sampleRate) else { return .none }
             if !state.silenceRecoveryAttempted {
                 state.silenceRecoveryAttempted = true
                 return .recover

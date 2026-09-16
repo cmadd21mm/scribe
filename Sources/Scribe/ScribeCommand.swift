@@ -38,9 +38,10 @@ private enum DemoSnapshotScreen: String, ExpressibleByArgument {
     case models
     case intelligence
     case onboarding
+    case speakers
 }
 
-struct DemoSnapshot: AsyncParsableCommand {
+struct DemoSnapshot: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "snapshot",
         abstract: "Render the built-in demo library to a PNG for visual regression review."
@@ -55,13 +56,22 @@ struct DemoSnapshot: AsyncParsableCommand {
     @Option(name: .long, help: "Appearance to render: light or dark.")
     private var appearance: String = "light"
 
-    func run() async throws {
-        try await render()
+    @Option(name: .long, help: "Onboarding step to render, from 0 through 4.")
+    var setupStep: Int = 0
+
+    @Flag(name: .long, help: "Preview local summary settings without changing saved preferences.")
+    var localAI = false
+
+    func run() throws {
+        guard (0...4).contains(setupStep) else { throw ValidationError("setup-step must be between 0 and 4") }
+        try MainActor.assumeIsolated { try render() }
     }
 
     @MainActor
     private func render() throws {
         let model = ScribeAppModel(root: URL(fileURLWithPath: "/tmp/scribe-demo"), demo: true)
+        model.setupStep = setupStep
+        if localAI { model.previewLocalAI() }
         let size: CGSize
         let selectedView: AnyView
         switch screen {
@@ -91,10 +101,14 @@ struct DemoSnapshot: AsyncParsableCommand {
             size = CGSize(width: 610, height: 490)
             selectedView = AnyView(ScribeModelManagerView(model: model))
         case .intelligence:
-            size = CGSize(width: 640, height: 690)
+            size = CGSize(width: 640, height: model.aiSettings.provider == .local ? 570 : 760)
             selectedView = AnyView(ScribeAISettingsView(model: model, apiKeyOverride: ""))
+        case .speakers:
+            size = CGSize(width: 740, height: 730)
+            model.selectedMeetingID = model.meetings[0].id
+            selectedView = AnyView(MeetingSpeakerEditor(model: model, meeting: model.meetings[0]))
         case .onboarding:
-            size = CGSize(width: 760, height: 570)
+            size = CGSize(width: 760, height: 690)
             selectedView = AnyView(ScribeOnboardingView(model: model))
         }
         let scheme: ColorScheme
@@ -282,6 +296,14 @@ final class AppController {
         model.onToggleRecording = { self.toggle() }
         model.onChooseRecordingsFolder = { self.chooseRecordingsFolder() }
         model.onCheckForUpdates = { self.updater.checkForUpdates() }
+        model.onRetryTranscription = { [weak self] directory in
+            guard let self else { return }
+            Task {
+                if let directory { await self.transcription.enqueue(directory) }
+                else { await self.transcription.resumePending(root: self.root) }
+            }
+        }
+        model.audioSetup.canStart = { [weak self] in self?.session == nil && self?.isStarting == false }
         model.onDownloadTranscriptionModel = { selected in
             self.downloadTranscriptionModel(selected)
         }
@@ -328,6 +350,8 @@ final class AppController {
             DistributedNotificationCenter.default().removeObserver(observer)
         }
         controlObservers.removeAll()
+        model.audioSetup.discard()
+        model.onCancelModelDownload?()
         stopSession()
         NSApp.terminate(nil)
     }
@@ -385,6 +409,16 @@ final class AppController {
             model.isStartingRecording = false
             return
         }
+        guard !model.audioSetup.isBusy else {
+            model.isStartingRecording = false
+            model.alertMessage = "Finish the audio setup test before recording a meeting."
+            return
+        }
+        if Config.transcriptionEnabled() && !LocalTranscriptionModel.selected.isInstalled {
+            model.isStartingRecording = false
+            model.openSetup(step: 1)
+            return
+        }
         isStarting = true
         model.isStartingRecording = true
         model.recordingStartDetail = "Preparing the meeting name…"
@@ -410,6 +444,7 @@ final class AppController {
             // without ever presenting or registering Scribe.
             model.recordingStartDetail = "Starting microphone… macOS may ask for access."
             let newSession = try RecordingSession(root: root, context: context)
+            try SpeakerIdentity.seedProfile(in: newSession.dir, name: Config.speakerName())
             try newSession.start(allowedBundleIDs: allowedBundleIDs ?? Config.callAppBundleIDs())
             session = newSession
             FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
@@ -441,7 +476,7 @@ final class AppController {
     }
 
     private func pollForCalls() {
-        guard Config.promptForCalls() else { return }
+        guard Config.promptForCalls(), !model.showOnboarding, !model.audioSetup.isBusy else { return }
         let snapshots: [AudioProcessSnapshot]
         do {
             snapshots = try AudioProcessDiscovery.snapshots()
@@ -543,7 +578,7 @@ final class AppController {
             model.transcriptionStatus = text
         case .failed(let name):
             menuBar.updateTranscription("transcription failed · \(name)")
-            model.transcriptionStatus = "Transcription needs attention"
+            model.transcriptionStatus = "Transcription needs attention — open the meeting to retry"
             model.refresh()
         }
     }
@@ -589,47 +624,17 @@ final class AppController {
         }
     }
 
+    private let modelDownload = ModelDownload()
+
     private func downloadTranscriptionModel(_ selected: LocalTranscriptionModel) {
-        let executable = URL(fileURLWithPath: CommandLine.arguments.first ?? "scribe")
-        Task { [weak self] in
-            let result = await Self.runModelDownload(executable: executable, model: selected)
+        model.onCancelModelDownload = { [weak self] in self?.modelDownload.cancel() }
+        modelDownload.start(model: selected) { [weak self] error in
             guard let self else { return }
-            if result.status == 0 {
-                model.finishModelDownload(selected)
-            } else {
-                model.finishModelDownload(selected, error: result.output)
+            self.model.finishModelDownload(selected, error: error)
+            if error == nil && selected.isInstalled {
+                Task { await self.transcription.resumePending(root: self.root) }
             }
         }
-    }
-
-    private struct ModelDownloadResult: Sendable {
-        let status: Int32
-        let output: String
-    }
-
-    nonisolated private static func runModelDownload(
-        executable: URL,
-        model: LocalTranscriptionModel
-    ) async -> ModelDownloadResult {
-        await Task.detached {
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = ["models", "download-transcription", "--model", model.rawValue]
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-            do {
-                try process.run()
-                process.waitUntilExit()
-                let output = String(
-                    data: pipe.fileHandleForReading.readDataToEndOfFile(),
-                    encoding: .utf8
-                ) ?? ""
-                return ModelDownloadResult(status: process.terminationStatus, output: output)
-            } catch {
-                return ModelDownloadResult(status: -1, output: error.localizedDescription)
-            }
-        }.value
     }
 
     private static func format(_ interval: TimeInterval) -> String {

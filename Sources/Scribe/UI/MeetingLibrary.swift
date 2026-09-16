@@ -333,7 +333,16 @@ enum MeetingLibraryReader {
         let originalNote = try? Data(contentsOf: noteURL)
         let originalTranscript = try? Data(contentsOf: transcriptURL)
 
-        let destination = uniqueDestination(for: meeting, title: title)
+        // The transcription queue retains this URL across model loading and
+        // both audio tracks. Moving an unfinished session strands that work
+        // (including its error log) at a path that no longer exists. The JSON
+        // completion marker is written only after all processing has finished.
+        let transcriptionComplete = FileManager.default.fileExists(
+            atPath: meeting.directory.appendingPathComponent("transcript.json").path
+        )
+        let destination = transcriptionComplete
+            ? uniqueDestination(for: meeting, title: title)
+            : meeting.directory
         do {
             try updatedMetadata.write(to: metadataURL, options: .atomic)
             try rewriteTitle(in: noteURL, title: title)
@@ -591,6 +600,14 @@ final class ScribeAppModel: ObservableObject {
     @Published var showNotesEditor = false
     @Published var showRenameEditor = false
     @Published var showSpeakerEditor = false
+    @Published var speakerEditorLineID: Int?
+    @Published var setupStep = UserDefaults.standard.integer(forKey: "scribe.setup.step")
+    @Published var speakerName = Config.speakerName()
+    @Published var modelDownloadError: String?
+    @Published var modelDownloadStartedAt: Date?
+    let audioSetup = AudioSetupTest()
+    var onCancelModelDownload: (() -> Void)?
+    var onRetryTranscription: ((URL?) -> Void)?
     @Published var showAssistant = false
     @Published var showAISettings = false
     @Published var showOrganizer = false
@@ -641,6 +658,11 @@ final class ScribeAppModel: ObservableObject {
         aiSettings = Config.aiSettings()
         showOnboarding = !demo && !UserDefaults.standard.bool(forKey: "scribe.onboarding.complete")
         refresh()
+    }
+
+    func previewLocalAI() {
+        guard demo else { return }
+        aiSettings = .init(provider: .local, model: "", baseURL: "", redactSensitive: true)
     }
 
     var filteredMeetings: [MeetingRecord] {
@@ -718,9 +740,48 @@ final class ScribeAppModel: ObservableObject {
         refresh(preservingSelection: false)
     }
 
+    var needsSetup: Bool {
+        !UserDefaults.standard.bool(forKey: "scribe.setup.finished")
+            || (transcriptionEnabled && !transcriptionModel.isInstalled)
+            || audioSetup.microphoneAccessNeedsReview
+            || (transcriptionEnabled && audioSetup.verifiedTranscriptionModelID != transcriptionModel.id)
+    }
+
+    func openSetup(step: Int = 0) {
+        setupStep = step
+        showSettings = false
+        showOnboarding = true
+    }
+
+    func saveSetupStep(_ step: Int) {
+        setupStep = step
+        UserDefaults.standard.set(step, forKey: "scribe.setup.step")
+    }
+
     func completeOnboarding() {
+        let ready = SetupReadiness.canFinish(
+            transcriptionEnabled: transcriptionEnabled,
+            modelInstalled: transcriptionModel.isInstalled,
+            audioVerified: audioSetup.verified && !audioSetup.microphoneAccessNeedsReview,
+            transcriptionVerified: audioSetup.verifiedTranscriptionModelID == transcriptionModel.id
+        )
+        UserDefaults.standard.set(ready, forKey: "scribe.setup.finished")
         UserDefaults.standard.set(true, forKey: "scribe.onboarding.complete")
         showOnboarding = false
+        audioSetup.discard()
+    }
+
+    @discardableResult
+    func saveSpeakerProfile(_ name: String) -> Bool {
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if !demo { try Config.update { $0.speakerName = cleaned } }
+            speakerName = cleaned
+            return true
+        } catch {
+            alertMessage = "Scribe couldn’t save your name: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func copySummary() {
@@ -1006,6 +1067,8 @@ final class ScribeAppModel: ObservableObject {
 
     func downloadTranscriptionModel(_ selected: LocalTranscriptionModel) {
         guard downloadingModelID == nil else { return }
+        modelDownloadError = nil
+        modelDownloadStartedAt = Date()
         downloadingModelID = selected.id
         transcriptionStatus = "Downloading \(selected.title)…"
         onDownloadTranscriptionModel?(selected)
@@ -1013,10 +1076,13 @@ final class ScribeAppModel: ObservableObject {
 
     func finishModelDownload(_ selected: LocalTranscriptionModel, error: String? = nil) {
         downloadingModelID = nil
+        modelDownloadStartedAt = nil
         if let error {
+            modelDownloadError = error
             transcriptionStatus = nil
-            alertMessage = "Model download failed. \(error)"
+            objectWillChange.send()
         } else {
+            modelDownloadError = nil
             selectTranscriptionModel(selected)
             transcriptionStatus = "\(selected.title) ready"
             objectWillChange.send()
@@ -1036,11 +1102,14 @@ final class ScribeAppModel: ObservableObject {
     @discardableResult
     func saveAISettings(_ settings: ScribeAISettings, apiKey: String) -> Bool {
         do {
-            if settings.provider.needsAPIKey {
+            if settings.provider != .local {
+                guard !settings.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ScribeAIError.missingModel }
+                if settings.provider.needsAPIKey && apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { throw ScribeAIError.missingAPIKey }
+                let endpoint = settings.baseURL.isEmpty ? settings.provider.defaultBaseURL : settings.baseURL
+                guard let url = URL(string: endpoint), ["https", "http"].contains(url.scheme), url.host != nil else { throw ScribeAIError.invalidEndpoint }
                 try ScribeKeychain.saveAPIKey(apiKey, provider: settings.provider)
             }
-            aiSettings = settings
-            persist {
+            try Config.update {
                 $0.intelligence = .init(
                     provider: settings.provider.rawValue,
                     model: settings.model,
@@ -1048,6 +1117,7 @@ final class ScribeAppModel: ObservableObject {
                     redactSensitive: settings.redactSensitive
                 )
             }
+            aiSettings = settings
             showAISettings = false
             return true
         } catch {
@@ -1109,6 +1179,11 @@ final class ScribeAppModel: ObservableObject {
 
     func openPrivacySettings(_ pane: String) {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(pane)")!
+        NSWorkspace.shared.open(url)
+    }
+
+    func openSoundSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.sound") else { return }
         NSWorkspace.shared.open(url)
     }
 

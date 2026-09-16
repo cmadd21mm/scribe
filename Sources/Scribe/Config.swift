@@ -49,6 +49,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
         }
     }
 
+    var speakerName: String? = nil
     var recordingsDir: String? = nil
     var transcription: Transcription? = nil
     var summarization: Summarization? = nil
@@ -63,6 +64,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
     var intelligence: Intelligence? = nil
 
     enum CodingKeys: String, CodingKey {
+        case speakerName = "speaker_name"
         case recordingsDir = "recordings_dir"
         case transcription, summarization
         case micVoiceProcessing = "mic_voice_processing"
@@ -106,6 +108,10 @@ enum Config {
 
     static func parse(_ data: Data) throws -> ScribeConfiguration {
         try JSONDecoder().decode(ScribeConfiguration.self, from: data)
+    }
+
+    static func speakerName() -> String {
+        load()?.speakerName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     static func recordingsDir() -> URL? {
@@ -169,6 +175,8 @@ enum Config {
         let gigabytes = max(0, load()?.minimumFreeDiskGB ?? 2)
         return Int64(gigabytes * 1_000_000_000)
     }
+
+    static func summarizationSettings() -> ScribeConfiguration.Summarization? { load()?.summarization }
 
     static func localSummarizer() -> LocalSummarizerConfiguration {
         guard let summary = load()?.summarization else {

@@ -146,6 +146,8 @@ struct MeetingLibraryTests {
             .write(to: directory.appendingPathComponent("note.md"))
         try Data("# Untitled meeting\n\n## Transcript\n".utf8)
             .write(to: directory.appendingPathComponent("transcript.md"))
+        try Data(#"{"segments":[]}"#.utf8)
+            .write(to: directory.appendingPathComponent("transcript.json"))
 
         let original = try #require(MeetingLibraryReader.read(directory: directory))
         let renamed = try MeetingLibraryReader.rename(original, to: "Customer kickoff")
