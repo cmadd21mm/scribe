@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.17
+
+- Add detailed Meeting Notes organized by discussion topic, with context,
+  reasoning, concerns, dependencies, and unresolved questions.
+- Generate detailed notes alongside summaries using the same connected AI
+  provider or configured local model, with more room for substantive detail.
+- Edit AI-generated summaries and meeting notes directly in the desktop app.
+  Corrections save locally without an AI call and survive regeneration.
+- Include corrected text in search, copied summaries and notes, and Markdown
+  exports, while retaining the original generated analysis on disk.
+- Add an easy regeneration path for older meetings and preserve compatibility
+  with existing meeting folders and older model responses.
+
 ## 0.2.16
 
 - Guide first-time setup through speech-model downloads, audio checks, and

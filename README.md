@@ -29,6 +29,15 @@ actions, and your own notes together in plain files.
   action-focused summaries. Your quick notes guide the result. Scribe offers a
   summary only after you connect a capable local or remote model—never a
   sentence-stitching fallback presented as analysis.
+- **The detail behind the summary.** Meeting Notes organize the discussion by
+  topic, preserving context, reasoning, concerns, and unresolved questions.
+  Copy them as a briefing or include them in a Markdown export. For an older
+  meeting, choose **Regenerate to add meeting notes** to refresh its analysis
+  with your connected model.
+- **Correct the record.** Use **Edit summary** or **Edit notes** to fix names,
+  facts, or wording without an AI call. Edits are saved in `summary-edits.md` and `meeting-notes.md`,
+  survive regeneration, and appear in search, copied notes, and Markdown exports.
+  The original generated analysis remains in `note.md`.
 - **Local means local.** No account, bot, telemetry, cloud transcript, hidden
   upload, subscription, or proprietary database.
 - **Work and life fit together.** Product reviews, client calls, appointments,

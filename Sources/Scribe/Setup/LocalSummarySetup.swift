@@ -19,6 +19,6 @@ enum LocalSummarySetup {
               URL(fileURLWithPath: model).pathExtension.lowercased() == "gguf" else {
             throw InvalidFiles(message: "Choose a readable GGUF summary model file.")
         }
-        return .init(backend: "llama.cpp", executable: executable, modelPath: model, predictionTokens: 1200)
+        return .init(backend: "llama.cpp", executable: executable, modelPath: model, predictionTokens: MeetingNoteInstructions.outputTokens)
     }
 }

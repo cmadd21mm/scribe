@@ -200,7 +200,7 @@ enum Config {
         return .available(LlamaCppSummarizer(
             executable: executable,
             model: model,
-            predictionTokens: summary.predictionTokens ?? 1_200
+            predictionTokens: summary.predictionTokens ?? MeetingNoteInstructions.outputTokens
         ))
     }
 

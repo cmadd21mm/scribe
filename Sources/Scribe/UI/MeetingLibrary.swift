@@ -56,11 +56,14 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     var captureKind: String? = nil
     var capturedSystemAudio: Bool = false
     var summary: String
+    var hasEditedSummary: Bool = false
     var decisions: [String]
     var actionItems: [MeetingActionItem]
     var openQuestions: [String]
     var transcript: [MeetingTranscriptLine]
     var userNotes: String
+    var meetingNotes: String = ""
+    var hasEditedMeetingNotes: Bool = false
     var speakerNames: [String: String] = [:]
     var speakerOverrides: [Int: String] = [:]
     var workspace: MeetingWorkspace = .init()
@@ -92,7 +95,7 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
     }
 
     var searchableText: String {
-        var fields = [title, summary, userNotes, workspace.project]
+        var fields = [title, summary, meetingNotes, userNotes, workspace.project]
         fields.append(contentsOf: attendees)
         fields.append(contentsOf: workspace.people)
         fields.append(contentsOf: workspace.tags)
@@ -159,6 +162,19 @@ struct MeetingRecord: Identifiable, Hashable, Sendable {
                 openQuestions: sample.0 == "Q4 product planning" ? ["Who owns the final support-readiness review?"] : [],
                 transcript: sample.5,
                 userNotes: sample.0 == "Q4 product planning" ? "Emphasize the simpler setup flow in the launch story." : "",
+                meetingNotes: sample.0 == "Q4 product planning" ? """
+                ### Beta scope and reporting
+
+                Jordan prepared the beta scope using feedback. Alex flagged the reporting flow for design validation, and Priya offered to run a review to address the gaps.
+
+                ### Onboarding experience
+
+                The prototype reduces setup to three steps. Alex suggested testing it with real users; the discussion did not establish a testing schedule.
+
+                ### Launch dependencies
+
+                Priya identified documentation, analytics, and support coverage as launch dependencies. Alex committed to confirming owners and sharing their status by Friday. The discussion did not confirm who would own each dependency.
+                """ : "",
                 isDemo: true
             )
         }
@@ -224,6 +240,8 @@ enum MeetingLibraryReader {
             encoding: .utf8
         )) ?? ""
         let sections = parseSections(noteText)
+        let editedMeetingNotes = MeetingNotesEdits.read(from: directory)
+        let editedSummary = MeetingSummaryEdits.read(from: directory)
         let isLegacyBuiltInNote = noteText.localizedCaseInsensitiveContains(
             "Generated locally with Scribe built-in summary"
         )
@@ -259,14 +277,17 @@ enum MeetingLibraryReader {
             capturedSystemAudio: metadata.files?["system"].map {
                 FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
             } ?? false,
-            summary: isLegacyBuiltInNote
+            summary: editedSummary ?? (isLegacyBuiltInNote
                 ? ""
-                : cleanSection(sections["summary"] ?? fallbackSummary(transcript: transcript)),
+                : cleanSection(sections["summary"] ?? fallbackSummary(transcript: transcript))),
+            hasEditedSummary: editedSummary != nil,
             decisions: isLegacyBuiltInNote ? [] : parseList(sections["decisions"] ?? ""),
             actionItems: actions,
             openQuestions: isLegacyBuiltInNote ? [] : parseList(sections["open questions"] ?? ""),
             transcript: transcript,
             userNotes: userNotes,
+            meetingNotes: editedMeetingNotes ?? (isLegacyBuiltInNote ? "" : detailedNotesSection(sections["meeting notes"] ?? "")),
+            hasEditedMeetingNotes: editedMeetingNotes != nil,
             speakerNames: speakerNames,
             speakerOverrides: speakerOverrides,
             workspace: MeetingWorkspaceStore.read(from: directory)
@@ -517,7 +538,11 @@ enum MeetingLibraryReader {
                 flush()
                 current = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces).lowercased()
                 lines = []
-            } else if current != nil && line != "---" {
+            } else if line == "---" {
+                flush()
+                current = nil
+                lines = []
+            } else if current != nil {
                 lines.append(line)
             }
         }
@@ -545,6 +570,12 @@ enum MeetingLibraryReader {
         text.replacingOccurrences(of: "> ", with: "")
             .replacingOccurrences(of: "_", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func detailedNotesSection(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ["_No detailed notes generated._", "_Not generated._"].contains(trimmed) { return "" }
+        return trimmed
     }
 
     private static func fallbackSummary(transcript: [MeetingTranscriptLine]) -> String {
@@ -598,6 +629,8 @@ final class ScribeAppModel: ObservableObject {
     @Published var showModelManager = false
     @Published var showOnboarding = false
     @Published var showNotesEditor = false
+    @Published var meetingNotesEditorMeeting: MeetingRecord?
+    @Published var summaryEditorMeeting: MeetingRecord?
     @Published var showRenameEditor = false
     @Published var showSpeakerEditor = false
     @Published var speakerEditorLineID: Int?
@@ -792,6 +825,17 @@ final class ScribeAppModel: ObservableObject {
         showNotice("Summary copied")
     }
 
+    func copyMeetingNotes() {
+        guard let meeting = selectedMeeting, !meeting.meetingNotes.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(formattedMeetingNotes(for: meeting), forType: .string)
+        showNotice("Meeting notes copied")
+    }
+
+    func formattedMeetingNotes(for meeting: MeetingRecord) -> String {
+        "# \(meeting.title)\n\n## Meeting Notes\n\n\(meeting.meetingNotes)"
+    }
+
     func formattedSummary(for meeting: MeetingRecord) -> String {
         let actions = meeting.actionItems.map { "- \($0.text)" }.joined(separator: "\n")
         let decisions = meeting.decisions.map { "- \($0)" }.joined(separator: "\n")
@@ -839,7 +883,9 @@ final class ScribeAppModel: ObservableObject {
             if !meeting.isDemo {
                 let source = meeting.directory.appendingPathComponent("note.md")
                 if FileManager.default.fileExists(atPath: source.path) {
-                    try FileManager.default.copyItem(at: source, to: destination)
+                    let markdown = try String(contentsOf: source, encoding: .utf8)
+                    try Data(MeetingAnalysisEdits.applying(to: markdown, in: meeting.directory).utf8)
+                        .write(to: destination, options: .atomic)
                     showNotice("Meeting exported")
                     return
                 }
@@ -863,6 +909,32 @@ final class ScribeAppModel: ObservableObject {
         } catch {
             alertMessage = "Scribe couldn’t save that action: \(error.localizedDescription)"
         }
+    }
+
+    func saveMeetingNotes(_ text: String, for meetingID: String) throws {
+        guard let index = meetings.firstIndex(where: { $0.id == meetingID }) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        if !meetings[index].isDemo {
+            try MeetingNotesEdits.save(text, to: meetings[index].directory)
+        }
+        meetings[index].meetingNotes = text
+        meetings[index].hasEditedMeetingNotes = true
+        meetingNotesEditorMeeting = nil
+        showNotice("Meeting notes saved")
+    }
+
+    func saveSummary(_ text: String, for meetingID: String) throws {
+        guard let index = meetings.firstIndex(where: { $0.id == meetingID }) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        if !meetings[index].isDemo {
+            try MeetingSummaryEdits.save(text, to: meetings[index].directory)
+        }
+        meetings[index].summary = text
+        meetings[index].hasEditedSummary = true
+        summaryEditorMeeting = nil
+        showNotice("Summary saved")
     }
 
     func saveUserNotes(_ text: String) {
@@ -1236,6 +1308,10 @@ final class ScribeAppModel: ObservableObject {
         ## Open questions
 
         \(questions.isEmpty ? "_None identified._" : questions)
+
+        ## Meeting Notes
+
+        \(meeting.meetingNotes.isEmpty ? "_No detailed notes generated._" : meeting.meetingNotes)
 
         ## My notes
 

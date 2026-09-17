@@ -403,7 +403,9 @@ struct ScribeRemoteMeetingSummarizer: MeetingSummarizer {
         let prompt = """
         Turn this meeting transcript into factual, useful notes. Use only the supplied material.
         Return exactly one JSON object without Markdown fences using this schema:
-        {"summary":"string","decisions":["string"],"actionItems":[{"task":"string","owner":"string or null","due":"string or null"}],"openQuestions":["string"]}
+        \(MeetingNoteInstructions.schema)
+
+        \(MeetingNoteInstructions.discussionGuidance)
 
         Requirements:
         - Write a coherent summary of the actual discussion and outcome, not a collage of transcript sentences.
@@ -426,7 +428,7 @@ struct ScribeRemoteMeetingSummarizer: MeetingSummarizer {
         let output = try await ScribeRemoteAIClient.complete(
             prompt: prompt,
             settings: settings,
-            maxTokens: 1_200,
+            maxTokens: MeetingNoteInstructions.outputTokens,
             structuredMeetingNote: true
         )
         return try SummaryOutputParser.parse(output)
@@ -563,9 +565,21 @@ enum ScribeRemoteAIClient {
                 "schema": [
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["summary", "decisions", "actionItems", "openQuestions"],
+                    "required": ["summary", "decisions", "actionItems", "openQuestions", "meetingNotes"],
                     "properties": [
                         "summary": ["type": "string"],
+                        "meetingNotes": [
+                            "type": "array",
+                            "items": [
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["topic", "notes"],
+                                "properties": [
+                                    "topic": ["type": "string"],
+                                    "notes": ["type": "string"],
+                                ],
+                            ],
+                        ],
                         "decisions": ["type": "array", "items": ["type": "string"]],
                         "actionItems": [
                             "type": "array",
