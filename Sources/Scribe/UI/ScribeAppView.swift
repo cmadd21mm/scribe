@@ -39,6 +39,12 @@ struct ScribeAppView: View {
                 MeetingNotesEditor(model: model, meeting: meeting)
             }
         }
+        .sheet(item: $model.meetingNotesEditorMeeting) { meeting in
+            MeetingAnalysisEditor(model: model, meeting: meeting, kind: .meetingNotes)
+        }
+        .sheet(item: $model.summaryEditorMeeting) { meeting in
+            MeetingAnalysisEditor(model: model, meeting: meeting, kind: .summary)
+        }
         .sheet(isPresented: $model.showRenameEditor) {
             if let meeting = model.selectedMeeting {
                 MeetingRenameEditor(model: model, meeting: meeting)
@@ -440,8 +446,31 @@ private struct MeetingDetail: View {
                     }
 
                     ScribeSectionDivider().padding(.vertical, 22)
-                    contentSection(title: "Summary") {
-                        if meeting.summary.isEmpty {
+                    VStack(alignment: .leading, spacing: 13) {
+                        HStack {
+                            Text("Summary")
+                                .font(ScribeTheme.serif(23, weight: .semibold))
+                                .foregroundStyle(ScribeTheme.ink)
+                            Spacer()
+                            Button {
+                                model.summaryEditorMeeting = meeting
+                            } label: {
+                                Label("Edit summary", systemImage: "pencil")
+                            }
+                            .buttonStyle(ScribeSecondaryButtonStyle())
+                            .disabled(meeting.state == "recording")
+                            .accessibilityHint("Edit the summary locally; your changes are kept when analysis is regenerated")
+                        }
+                        if meeting.hasEditedSummary {
+                            Text("Edited by you · Kept when regenerating")
+                                .font(ScribeTheme.sans(11))
+                                .foregroundStyle(ScribeTheme.mutedInk)
+                        }
+                        if meeting.summary.isEmpty && meeting.hasEditedSummary {
+                            Text("Your summary is empty. Choose Edit summary to add text.")
+                                .font(ScribeTheme.sans(13))
+                                .foregroundStyle(ScribeTheme.mutedInk)
+                        } else if meeting.summary.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text(model.configuredSummaryAIName.map {
                                     "The transcript is ready. Generate reliable meeting analysis with \($0)."
@@ -496,7 +525,7 @@ private struct MeetingDetail: View {
                                     } label: {
                                         Label(
                                             model.configuredSummaryAIName.map { "Regenerate with \($0)" }
-                                                ?? "Regenerate summary",
+                                                ?? "Regenerate analysis",
                                             systemImage: "arrow.triangle.2.circlepath"
                                         )
                                     }
@@ -507,7 +536,7 @@ private struct MeetingDetail: View {
                                             || meeting.state == "recording"
                                             || model.regeneratingMeetingID != nil
                                     )
-                                    .accessibilityHint("Replaces the current structured notes after the new result succeeds")
+                                    .accessibilityHint("Refreshes AI analysis after the new result succeeds, preserving your edited summary and meeting notes")
                                 }
                             }
                         }
@@ -578,6 +607,9 @@ private struct MeetingDetail: View {
                             }
                         }
                     }
+
+                    ScribeSectionDivider().padding(.vertical, 22)
+                    meetingNotesSection
 
                     if !meeting.userNotes.isEmpty {
                         ScribeSectionDivider().padding(.vertical, 22)
@@ -720,6 +752,84 @@ private struct MeetingDetail: View {
         case "recording": return "Recording in progress"
         case "interrupted": return "Recovered recording"
         default: return meeting.hasTranscript ? "Recording saved" : "Saved · processing locally"
+        }
+    }
+
+    private var meetingNotesSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack {
+                Text("Meeting Notes")
+                    .font(ScribeTheme.serif(23, weight: .semibold))
+                    .foregroundStyle(ScribeTheme.ink)
+                Spacer()
+                Button {
+                    model.meetingNotesEditorMeeting = meeting
+                } label: {
+                    Label("Edit notes", systemImage: "pencil")
+                }
+                .buttonStyle(ScribeSecondaryButtonStyle())
+                .disabled(meeting.state == "recording")
+                .accessibilityHint("Edit meeting notes locally; your changes are kept when analysis is regenerated")
+                if !meeting.meetingNotes.isEmpty {
+                    Button {
+                        model.copyMeetingNotes()
+                    } label: {
+                        Label("Copy notes", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(ScribeSecondaryButtonStyle())
+                    .accessibilityHint("Copies detailed meeting notes with the meeting title")
+                }
+            }
+
+            if meeting.hasEditedMeetingNotes {
+                Text("Edited by you · Kept when regenerating")
+                    .font(ScribeTheme.sans(11))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            }
+
+            if meeting.meetingNotes.isEmpty && meeting.hasEditedMeetingNotes {
+                Text("Your meeting notes are empty. Choose Edit notes to add text.")
+                    .font(ScribeTheme.sans(13))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+            } else if meeting.meetingNotes.isEmpty {
+                Text(meeting.state == "recording"
+                     ? "Detailed notes can be generated once the recording and transcript are ready."
+                     : "A topic-by-topic account of the discussion, including context, reasoning, concerns, and unresolved points.")
+                    .font(ScribeTheme.sans(13))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+                if model.regeneratingMeetingID == meeting.id {
+                    Text("Generating meeting notes…")
+                        .font(ScribeTheme.sans(12))
+                        .foregroundStyle(ScribeTheme.mutedInk)
+                } else {
+                    Button {
+                        model.regenerateSelectedNote()
+                    } label: {
+                        Label(meeting.summary.isEmpty ? "Generate meeting notes" : "Regenerate to add meeting notes",
+                              systemImage: "sparkles")
+                    }
+                    .buttonStyle(ScribeSecondaryButtonStyle())
+                    .disabled(meeting.isDemo || !meeting.hasTranscript || meeting.state == "recording" || model.regeneratingMeetingID != nil)
+                    .accessibilityHint("Generates detailed notes and refreshes the summary, decisions, and action items")
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(meeting.meetingNotes.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, block in
+                        if block.hasPrefix("### ") {
+                            Text(String(block.dropFirst(4)))
+                                .font(ScribeTheme.sans(14, weight: .semibold))
+                                .padding(.top, 6)
+                        } else {
+                            Text(block)
+                                .font(ScribeTheme.sans(14))
+                                .lineSpacing(5)
+                        }
+                    }
+                }
+                .foregroundStyle(ScribeTheme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            }
         }
     }
 
@@ -1089,6 +1199,73 @@ private struct ScribeHome: View {
         formatter.dateFormat = "EEE, MMM d"
         return formatter
     }()
+}
+
+struct MeetingAnalysisEditor: View {
+    enum Kind { case summary, meetingNotes }
+    @ObservedObject var model: ScribeAppModel
+    let meeting: MeetingRecord
+    let kind: Kind
+    @State private var notes: String
+    @State private var saveError: String?
+
+    init(model: ScribeAppModel, meeting: MeetingRecord, kind: Kind) {
+        self.model = model
+        self.meeting = meeting
+        self.kind = kind
+        _notes = State(initialValue: kind == .summary ? meeting.summary : meeting.meetingNotes)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(kind == .summary ? "Edit summary" : "Edit meeting notes")
+                .font(ScribeTheme.serif(28, weight: .semibold))
+                .foregroundStyle(ScribeTheme.ink)
+            Text(meeting.title)
+                .font(ScribeTheme.sans(12))
+                .foregroundStyle(ScribeTheme.mutedInk)
+            Text("Fix names, facts, or wording. Your edits are saved on this Mac and kept when you regenerate the analysis.")
+                .font(ScribeTheme.sans(13))
+                .foregroundStyle(ScribeTheme.mutedInk)
+            TextEditor(text: $notes)
+                .font(ScribeTheme.sans(14))
+                .scrollContentBackground(.hidden)
+                .padding(10)
+                .background(ScribeTheme.surface.opacity(0.72))
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(ScribeTheme.divider, lineWidth: 1))
+                .accessibilityLabel(kind == .summary ? "Summary text" : "Meeting notes text")
+            if let saveError {
+                Text(saveError)
+                    .font(ScribeTheme.sans(12))
+                    .foregroundStyle(ScribeTheme.coral)
+                    .textSelection(.enabled)
+            }
+            HStack {
+                Text(kind == .summary ? "Saving does not call AI." : "Use ### for topic headings. Saving does not call AI.")
+                    .font(ScribeTheme.sans(11))
+                    .foregroundStyle(ScribeTheme.mutedInk)
+                Spacer()
+                Button("Cancel") {
+                    if kind == .summary { model.summaryEditorMeeting = nil }
+                    else { model.meetingNotesEditorMeeting = nil }
+                }
+                    .keyboardShortcut(.cancelAction)
+                Button(kind == .summary ? "Save summary" : "Save notes") {
+                    do {
+                        if kind == .summary { try model.saveSummary(notes, for: meeting.id) }
+                        else { try model.saveMeetingNotes(notes, for: meeting.id) }
+                    } catch { saveError = "Couldn’t save your changes: \(error.localizedDescription)" }
+                }
+                .buttonStyle(ScribePrimaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(26)
+        .frame(width: 740, height: kind == .summary ? 460 : 600)
+        .background(ScribeTheme.paper)
+        .interactiveDismissDisabled()
+    }
 }
 
 private struct MeetingNotesEditor: View {

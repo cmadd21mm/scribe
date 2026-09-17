@@ -12,7 +12,8 @@ struct NotePipelineTests {
                 summary: "The team approved the launch plan.",
                 decisions: ["Launch on Friday."],
                 actionItems: [.init(task: "Send the final invite.", owner: "Priya", due: "Thursday")],
-                openQuestions: []
+                openQuestions: [],
+                meetingNotes: [.init(topic: "Launch readiness", notes: "The team reviewed readiness and approved the launch plan.")]
             )
         }
     }
@@ -96,6 +97,8 @@ struct NotePipelineTests {
         let markdown = try String(contentsOf: dir.appendingPathComponent("note.md"), encoding: .utf8)
         let log = try String(contentsOf: dir.appendingPathComponent("summary.log"), encoding: .utf8)
         #expect(markdown.contains("The team approved the launch plan."))
+        #expect(markdown.contains("## Meeting Notes\n\n### Launch readiness"))
+        #expect(MeetingLibraryReader.read(directory: dir)?.meetingNotes.contains("reviewed readiness") == true)
         #expect(markdown.contains("Generated with Venice AI · kimi-k3"))
         #expect(!markdown.contains("Generated locally with Venice"))
         #expect(log.contains("backend=Venice AI · kimi-k3"))

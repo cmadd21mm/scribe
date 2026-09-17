@@ -39,6 +39,8 @@ private enum DemoSnapshotScreen: String, ExpressibleByArgument {
     case intelligence
     case onboarding
     case speakers
+    case notesEditor = "notes-editor"
+    case summaryEditor = "summary-editor"
 }
 
 struct DemoSnapshot: ParsableCommand {
@@ -50,7 +52,7 @@ struct DemoSnapshot: ParsableCommand {
     @Option(name: .long, help: "PNG output path.")
     var output: String = "scribe-demo.png"
 
-    @Option(name: .long, help: "Screen to render: library, meeting, summary, assistant, rename, settings, models, intelligence, or onboarding.")
+    @Option(name: .long, help: "Screen to render: library, meeting, summary, summary-editor, notes-editor, assistant, rename, settings, models, intelligence, or onboarding.")
     private var screen: DemoSnapshotScreen = .library
 
     @Option(name: .long, help: "Appearance to render: light or dark.")
@@ -94,6 +96,12 @@ struct DemoSnapshot: ParsableCommand {
         case .rename:
             size = CGSize(width: 500, height: 220)
             selectedView = AnyView(MeetingRenameEditor(model: model, meeting: model.meetings[0]))
+        case .notesEditor:
+            size = CGSize(width: 740, height: 600)
+            selectedView = AnyView(MeetingAnalysisEditor(model: model, meeting: model.meetings[0], kind: .meetingNotes))
+        case .summaryEditor:
+            size = CGSize(width: 740, height: 460)
+            selectedView = AnyView(MeetingAnalysisEditor(model: model, meeting: model.meetings[0], kind: .summary))
         case .settings:
             size = CGSize(width: 680, height: 760)
             selectedView = AnyView(ScribeSettingsView(model: model))

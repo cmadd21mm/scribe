@@ -90,8 +90,9 @@ struct LlamaCppSummarizer: MeetingSummarizer {
         """
         You turn meeting transcripts into factual structured notes. Use only the transcript.
         Return exactly one JSON object and no Markdown fences, with this schema:
-        {"summary":"string","decisions":["string"],"actionItems":[{"task":"string","owner":"string or null","due":"string or null"}],"openQuestions":["string"]}
+        \(MeetingNoteInstructions.schema)
         Do not invent decisions, owners, dates, or questions. Empty arrays are valid.
+        \(MeetingNoteInstructions.discussionGuidance)
         Note style: \(request.style.title). \(request.style.guidance)
 
         Meeting: \(request.title)

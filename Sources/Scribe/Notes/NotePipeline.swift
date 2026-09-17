@@ -33,6 +33,10 @@ enum NoteRenderer {
 
         \(list(note.openQuestions))
 
+        ## Meeting Notes
+
+        \(discussion(note.meetingNotes ?? []))
+
         ---
 
         _\(generatedLocally ? "Generated locally with" : "Generated with") \(backendName). See [transcript](transcript.md)._
@@ -78,6 +82,17 @@ enum NoteRenderer {
 
     private static func list(_ values: [String]) -> String {
         values.isEmpty ? "_None identified._" : values.map { "- \($0)" }.joined(separator: "\n")
+    }
+
+    private static func discussion(_ topics: [StructuredMeetingNote.DiscussionTopic]) -> String {
+        let sections = topics.compactMap { topic -> String? in
+            let heading = topic.topic.components(separatedBy: .newlines).joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let notes = topic.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !notes.isEmpty else { return nil }
+            return heading.isEmpty ? notes : "### \(heading)\n\n\(notes)"
+        }
+        return sections.isEmpty ? "_No detailed notes generated._" : sections.joined(separator: "\n\n")
     }
 
     private static func actionList(_ values: [StructuredMeetingNote.ActionItem]) -> String {
