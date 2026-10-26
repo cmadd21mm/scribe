@@ -81,6 +81,14 @@ struct ScribeSettingsView: View {
                                 set: { value in model.setLaunchAtLogin(value) }
                             )
                         )
+                        settingToggle(
+                            "Hide Dock icon when window is closed",
+                            detail: "Scribe stays in the menu bar, recording and transcribing as usual. Reopen it from the menu bar icon.",
+                            isOn: Binding(
+                                get: { model.hideDockIconWhenClosed },
+                                set: { value in model.setHideDockIconWhenClosed(value) }
+                            )
+                        )
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: "arrow.triangle.2.circlepath")
                                 .foregroundStyle(ScribeTheme.ink)

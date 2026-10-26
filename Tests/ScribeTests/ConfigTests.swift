@@ -14,6 +14,7 @@ struct ConfigTests {
           "call_end_delay_seconds": 20,
           "minimum_free_disk_gb": 3.5,
           "prompt_for_calls": false,
+          "hide_dock_icon_when_closed": false,
           "note_style": "action-focused",
           "appearance": "dark",
           "mic_voice_processing": true,
@@ -35,6 +36,7 @@ struct ConfigTests {
         #expect(document.minimumFreeDiskGB == 3.5)
         #expect(document.micVoiceProcessing == true)
         #expect(document.promptForCalls == false)
+        #expect(document.hideDockIconWhenClosed == false)
         #expect(document.noteStyle == "action-focused")
         #expect(document.appearance == "dark")
         #expect(document.transcription?.engine == "parakeet")

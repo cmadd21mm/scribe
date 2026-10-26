@@ -3,7 +3,10 @@ import SwiftUI
 
 @MainActor
 final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSApplicationDelegate {
+    private let model: ScribeAppModel
+
     init(model: ScribeAppModel, demo: Bool) {
+        self.model = model
         let content = ScribeAppView(model: model)
         let hosting = NSHostingView(rootView: content)
         let size = demo ? NSSize(width: 1_440, height: 1_024) : NSSize(width: 1_260, height: 820)
@@ -54,9 +57,10 @@ final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSAppl
         return true
     }
 
-    /// Drops back to menu-bar-only while the main window is closed.
+    /// Drops back to menu-bar-only while the main window is closed, unless
+    /// the user turned that off in Settings.
     func hideFromDockIfClosed() {
-        guard window?.isVisible != true else { return }
+        guard model.hideDockIconWhenClosed, window?.isVisible != true else { return }
         NSApp.setActivationPolicy(.accessory)
     }
 

@@ -20,7 +20,10 @@ struct MainMenuTests {
         window.orderOut(nil)
     }
 
-    @Test("Closing the main window leaves only the menu bar icon; presenting restores the Dock icon")
+    @Test(
+        "Closing the main window leaves only the menu bar icon; presenting restores the Dock icon",
+        .enabled(if: Config.hideDockIconWhenClosed(), "Hide Dock icon is turned off in this Mac's Scribe settings")
+    )
     @MainActor
     func closeHidesDockIconAndPresentRestoresIt() throws {
         _ = NSApplication.shared

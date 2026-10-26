@@ -661,6 +661,7 @@ final class ScribeAppModel: ObservableObject {
     @Published private(set) var voiceProcessingEnabled: Bool
     @Published private(set) var enabledBundleIDs: Set<String>
     @Published private(set) var launchAtLogin: Bool
+    @Published private(set) var hideDockIconWhenClosed: Bool
     @Published private(set) var noteStyle: MeetingNoteStyle
     @Published private(set) var appearance: ScribeAppearance
     @Published private(set) var transcriptionModel: LocalTranscriptionModel
@@ -685,6 +686,7 @@ final class ScribeAppModel: ObservableObject {
         voiceProcessingEnabled = Config.micVoiceProcessing()
         enabledBundleIDs = Config.callAppBundleIDs()
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        hideDockIconWhenClosed = Config.hideDockIconWhenClosed()
         noteStyle = Config.noteStyle()
         appearance = Config.appearance()
         transcriptionModel = .selected
@@ -1207,6 +1209,11 @@ final class ScribeAppModel: ObservableObject {
             forType: .string
         )
         showNotice("Meeting context copied")
+    }
+
+    func setHideDockIconWhenClosed(_ enabled: Bool) {
+        hideDockIconWhenClosed = enabled
+        persist { $0.hideDockIconWhenClosed = enabled }
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) {
