@@ -155,7 +155,7 @@ enum Config {
     }
 
     static func hideDockIconWhenClosed() -> Bool {
-        load()?.hideDockIconWhenClosed ?? true
+        load()?.hideDockIconWhenClosed ?? false
     }
 
     static func noteStyle() -> MeetingNoteStyle {

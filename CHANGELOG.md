@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-- Closing the main window now leaves Scribe in the menu bar only, with no Dock
-  icon or Cmd-Tab entry. Opening the window again brings the Dock icon back.
-  Turn this off in Settings with "Hide Dock icon when window is closed".
+- Add "Hide Dock icon when window is closed" to Settings (off by default). When
+  on, closing the main window leaves Scribe in the menu bar only, with no Dock
+  icon or Cmd-Tab entry, and opening the window again brings the Dock icon back.
 
 ## 0.2.17
 

@@ -661,7 +661,8 @@ final class ScribeAppModel: ObservableObject {
     @Published private(set) var voiceProcessingEnabled: Bool
     @Published private(set) var enabledBundleIDs: Set<String>
     @Published private(set) var launchAtLogin: Bool
-    @Published private(set) var hideDockIconWhenClosed: Bool
+    /// Set through `setHideDockIconWhenClosed` to persist; tests assign it directly.
+    @Published var hideDockIconWhenClosed: Bool
     @Published private(set) var noteStyle: MeetingNoteStyle
     @Published private(set) var appearance: ScribeAppearance
     @Published private(set) var transcriptionModel: LocalTranscriptionModel

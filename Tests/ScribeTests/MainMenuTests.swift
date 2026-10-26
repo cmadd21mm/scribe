@@ -20,16 +20,14 @@ struct MainMenuTests {
         window.orderOut(nil)
     }
 
-    @Test(
-        "Closing the main window leaves only the menu bar icon; presenting restores the Dock icon",
-        .enabled(if: Config.hideDockIconWhenClosed(), "Hide Dock icon is turned off in this Mac's Scribe settings")
-    )
+    @Test("With Hide Dock icon on, closing leaves only the menu bar icon; presenting restores the Dock icon")
     @MainActor
     func closeHidesDockIconAndPresentRestoresIt() throws {
         _ = NSApplication.shared
         let originalPolicy = NSApp.activationPolicy()
         defer { NSApp.setActivationPolicy(originalPolicy) }
         let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        model.hideDockIconWhenClosed = true
         let controller = ScribeWindowController(model: model, demo: true)
         let window = try #require(controller.window)
 
@@ -46,6 +44,23 @@ struct MainMenuTests {
         #expect(NSApp.activationPolicy() == .regular)
 
         window.orderOut(nil)
+    }
+
+    @Test("With Hide Dock icon off, closing the main window keeps the Dock icon")
+    @MainActor
+    func closeKeepsDockIconByDefault() throws {
+        _ = NSApplication.shared
+        let originalPolicy = NSApp.activationPolicy()
+        defer { NSApp.setActivationPolicy(originalPolicy) }
+        let model = ScribeAppModel(root: FileManager.default.temporaryDirectory, demo: true)
+        model.hideDockIconWhenClosed = false
+        let controller = ScribeWindowController(model: model, demo: true)
+        let window = try #require(controller.window)
+
+        controller.present()
+        #expect(!controller.windowShouldClose(window))
+        #expect(!window.isVisible)
+        #expect(NSApp.activationPolicy() == .regular)
     }
 
     @Test("A denied microphone recording opens the correct privacy pane")
