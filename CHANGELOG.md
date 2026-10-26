@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add "Hide Dock icon when window is closed" to Settings (off by default). When
+  on, closing the main window leaves Scribe in the menu bar only, with no Dock
+  icon or Cmd-Tab entry, and opening the window again brings the Dock icon back.
+
 ## 0.2.17
 
 - Add detailed Meeting Notes organized by discussion topic, with context,

@@ -521,9 +521,14 @@ final class AppController {
         alert.informativeText = "Scribe never records automatically. Audio stays on this Mac."
         alert.addButton(withTitle: "Record")
         alert.addButton(withTitle: "Not now")
+        // Keep the prompt reachable from the Dock and Cmd-Tab even when the
+        // main window is closed and Scribe is menu-bar-only.
+        ScribeWindowController.showInDock()
         NSApp.activate(ignoringOtherApps: true)
 
-        if alert.runModal() == .alertFirstButtonReturn {
+        let response = alert.runModal()
+        windowController.hideFromDockIfClosed()
+        if response == .alertFirstButtonReturn {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.startSession(
