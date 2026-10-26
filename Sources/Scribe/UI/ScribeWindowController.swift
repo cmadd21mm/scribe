@@ -3,7 +3,10 @@ import SwiftUI
 
 @MainActor
 final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSApplicationDelegate {
+    private let model: ScribeAppModel
+
     init(model: ScribeAppModel, demo: Bool) {
+        self.model = model
         let content = ScribeAppView(model: model)
         let hosting = NSHostingView(rootView: content)
         let size = demo ? NSSize(width: 1_440, height: 1_024) : NSSize(width: 1_260, height: 820)
@@ -31,9 +34,34 @@ final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSAppl
     }
 
     func present() {
+        let wasInBackground = Self.showInDock()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        if wasInBackground {
+            // AppKit can leave the main menu unresponsive when an app
+            // activates in the same turn it leaves accessory mode.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { NSApp.activate(ignoringOtherApps: true) }
+            }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// Restores the Dock icon and Cmd-Tab entry. Returns true when Scribe was
+    /// running menu-bar-only.
+    @discardableResult
+    static func showInDock() -> Bool {
+        guard NSApp.activationPolicy() != .regular else { return false }
+        NSApp.setActivationPolicy(.regular)
+        return true
+    }
+
+    /// Drops back to menu-bar-only while the main window is closed, unless
+    /// the user turned that off in Settings.
+    func hideFromDockIfClosed() {
+        guard model.hideDockIconWhenClosed, window?.isVisible != true else { return }
+        NSApp.setActivationPolicy(.accessory)
     }
 
     func applicationShouldHandleReopen(
@@ -51,6 +79,7 @@ final class ScribeWindowController: NSWindowController, NSWindowDelegate, NSAppl
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         sender.orderOut(nil)
+        hideFromDockIfClosed()
         return false
     }
 }

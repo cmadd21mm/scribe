@@ -59,6 +59,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
     var callEndDelaySeconds: Double? = nil
     var minimumFreeDiskGB: Double? = nil
     var promptForCalls: Bool? = nil
+    var hideDockIconWhenClosed: Bool? = nil
     var noteStyle: String? = nil
     var appearance: String? = nil
     var intelligence: Intelligence? = nil
@@ -73,6 +74,7 @@ struct ScribeConfiguration: Codable, Equatable, Sendable {
         case callEndDelaySeconds = "call_end_delay_seconds"
         case minimumFreeDiskGB = "minimum_free_disk_gb"
         case promptForCalls = "prompt_for_calls"
+        case hideDockIconWhenClosed = "hide_dock_icon_when_closed"
         case noteStyle = "note_style"
         case appearance
         case intelligence
@@ -150,6 +152,10 @@ enum Config {
 
     static func promptForCalls() -> Bool {
         load()?.promptForCalls ?? true
+    }
+
+    static func hideDockIconWhenClosed() -> Bool {
+        load()?.hideDockIconWhenClosed ?? false
     }
 
     static func noteStyle() -> MeetingNoteStyle {
